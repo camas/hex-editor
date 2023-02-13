@@ -19,7 +19,17 @@ fn test_expressions() {
 
         local int a = 0.1 ? 3 : 4;
 
-        i64 a[10];
+        if(1) {
+            i32 a;
+        } else if (2) {
+            i32 b;
+        } else if (3) {
+            i32 c;
+        } else {
+            i32 d;
+        }
+
+        i32 a[10];
         "#;
 
     let parsed = parse_bt(input).unwrap();

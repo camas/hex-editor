@@ -37,7 +37,7 @@ pub enum TransformError {
     AssignNonLocalVariable,
     // TODO: Remove
     #[error("Generic error")]
-    Generic,
+    Generic(&'static str),
 }
 
 type TransformResult<T> = Result<T, TransformError>;
@@ -146,6 +146,7 @@ pub enum Instruction {
     Label(LabelRef),
     Jump(LabelRef),
     JumpTrue(LabelRef),
+    JumpFalse(LabelRef),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -386,6 +387,8 @@ pub fn transform(parsed_data: ParsedData) -> TransformResult<BtProgram> {
         }
     }
 
+    context.end_function();
+
     let functions = (0..parsed_data.function_ref_counter)
         .map(|i| context.functions.remove(&i).unwrap())
         .collect::<Vec<_>>();
@@ -409,7 +412,17 @@ fn transform_statement(
         } => {
             let variable_ref = context.create_variable_ref(name.clone())?;
             let arg_count = args.len();
-            let attributes = transform_attributes(context, attributes);
+
+            let attributes = if local {
+                if !attributes.is_empty() {
+                    return Err(TransformError::Generic(
+                        "local variables can't have attributes",
+                    ));
+                }
+                Vec::new()
+            } else {
+                transform_attributes(context, attributes)
+            };
 
             let decl_instr = create_declare_instruction(
                 context,
@@ -443,7 +456,12 @@ fn transform_statement(
                 return Err(TransformError::AssignNonLocalVariable);
             }
             let variable_ref = context.create_variable_ref(name.clone())?;
-            let attributes = transform_attributes(context, attributes);
+
+            if !attributes.is_empty() {
+                return Err(TransformError::Generic(
+                    "local variables can't have attributes",
+                ));
+            }
 
             let decl_instr = create_declare_instruction(
                 context,
@@ -451,7 +469,7 @@ fn transform_statement(
                 variable_ref,
                 object_type,
                 local,
-                attributes,
+                Vec::new(),
                 0,
             )?;
 
@@ -492,7 +510,7 @@ fn transform_statement(
             let object_ref = *context
                 .object_refs
                 .get(&original)
-                .ok_or(TransformError::Generic)?;
+                .ok_or(TransformError::Generic("couldn't find object"))?;
             context.object_refs.insert(alias, object_ref);
         }
         Statement::DeclareEnum {
@@ -523,38 +541,94 @@ fn transform_statement(
             else_ifs,
             final_else,
         } => {
-            todo!()
-            // let mut final_label_ref = context.create_label_ref();
-            // let mut next_check_label_ref = context.create_label_ref();
+            let final_label_ref = context.create_label_ref();
+            let mut next_check_label_ref = final_label_ref;
 
-            // context.queue_instruction(Instruction::Label(final_label_ref));
-            // if let Some(statements) = final_else {
-            //     for statement in statements.into_iter().rev() {
-            //         context.queue_statement(statement);
-            //     }
-            // }
-            // for (condition, statements) in else_ifs.into_iter().rev() {}
+            context.queue_instruction(Instruction::Label(final_label_ref));
 
-            // for statement in statements.into_iter().rev() {
-            //     context.queue_statement(statement);
-            // }
-            // context.queue_instruction(Instruction::JumpTrue(end_label_ref));
-            // context.queue_expression(condition);
+            if let Some(statements) = final_else {
+                next_check_label_ref = context.create_label_ref();
+
+                for statement in statements.into_iter().rev() {
+                    context.queue_statement(statement);
+                }
+                context.queue_instruction(Instruction::Label(next_check_label_ref));
+            }
+
+            for (condition, statements) in else_ifs.into_iter().rev() {
+                context.queue_instruction(Instruction::Jump(final_label_ref));
+                for statement in statements.into_iter().rev() {
+                    context.queue_statement(statement);
+                }
+                context.queue_instruction(Instruction::JumpFalse(next_check_label_ref));
+                context.queue_expression(condition);
+
+                next_check_label_ref = context.create_label_ref();
+                context.queue_instruction(Instruction::Label(next_check_label_ref));
+            }
+
+            context.queue_instruction(Instruction::Jump(final_label_ref));
+            for statement in statements.into_iter().rev() {
+                context.queue_statement(statement);
+            }
+            context.queue_instruction(Instruction::JumpFalse(next_check_label_ref));
+            context.queue_expression(condition);
         }
         Statement::While {
             condition,
             statements,
-        } => todo!(),
+        } => {
+            let end_label_ref = context.create_label_ref();
+            let condition_label_ref = context.create_label_ref();
+
+            context.queue_instruction(Instruction::Label(end_label_ref));
+            context.queue_instruction(Instruction::Jump(condition_label_ref));
+            for statement in statements.into_iter().rev() {
+                context.queue_statement(statement);
+            }
+            context.queue_instruction(Instruction::JumpFalse(end_label_ref));
+            context.queue_expression(condition);
+            context.queue_instruction(Instruction::Label(condition_label_ref));
+        }
         Statement::DoWhile {
             condition,
             statements,
-        } => todo!(),
+        } => {
+            let start_label_ref = context.create_label_ref();
+
+            context.queue_instruction(Instruction::JumpTrue(start_label_ref));
+            context.queue_expression(condition);
+            for statement in statements.into_iter().rev() {
+                context.queue_statement(statement);
+            }
+            context.queue_instruction(Instruction::Label(start_label_ref));
+        }
         Statement::For {
             initialization,
             condition,
             increment,
             statements,
-        } => todo!(),
+        } => {
+            let loop_start_label_ref = context.create_label_ref();
+            let loop_end_label_ref = context.create_label_ref();
+
+            context.queue_instruction(Instruction::Label(loop_end_label_ref));
+            context.queue_instruction(Instruction::Jump(loop_start_label_ref));
+            if let Some(increment) = increment {
+                context.queue_expression(increment);
+            }
+            for statement in statements.into_iter().rev() {
+                context.queue_statement(statement);
+            }
+            if let Some(condition) = condition {
+                context.queue_instruction(Instruction::JumpFalse(loop_end_label_ref));
+                context.queue_expression(condition);
+            }
+            context.queue_instruction(Instruction::Label(loop_start_label_ref));
+            if let Some(initialization) = initialization {
+                context.queue_expression(initialization);
+            }
+        }
         Statement::Switch { value, switches } => todo!(),
         Statement::Break => todo!(),
         Statement::Continue => todo!(),

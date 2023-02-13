@@ -148,8 +148,8 @@ impl<'a> ExecutionContext<'a> {
 
         macro_rules! assign_instr {
             ($method:ident) => {{
-                let value = self.pop_resolve();
                 let variable_ref = self.pop_ref()?;
+                let value = self.pop_resolve();
                 let new_value = self
                     .variable(variable_ref)
                     .unwrap()
@@ -157,11 +157,13 @@ impl<'a> ExecutionContext<'a> {
                     .clone()
                     .$method(value)?;
                 self.set_variable(variable_ref, new_value);
+                self.push(Object::VariableRef(variable_ref));
             }};
         }
 
         let function_context = self.curr_function_context();
-        let instruction = &self.curr_function().instructions[function_context.instruction_pointer];
+        let function = self.curr_function();
+        let instruction = &function.instructions[function_context.instruction_pointer];
 
         match instruction {
             Instruction::Pop => {
@@ -332,17 +334,29 @@ impl<'a> ExecutionContext<'a> {
             Instruction::AssignBitwiseOr => assign_instr!(bitwise_or),
             Instruction::Label(_) => (),
             Instruction::Jump(label_ref) => {
-                let offset = self.curr_function().label_offsets[label_ref.0 as usize];
+                let offset = function.label_offsets[label_ref.0 as usize];
                 self.curr_function_context_mut().instruction_pointer = offset;
             }
             Instruction::JumpTrue(label_ref) => {
                 let label_ref_index = label_ref.0 as usize;
-                let object = self.pop();
+                let object = self.pop_resolve();
                 let value = match object {
                     Object::Number(v) => v.as_bool(),
                     _ => return Err(AnalyzeError::GenericError("not a bool")),
                 };
                 if value {
+                    let offset = self.curr_function().label_offsets[label_ref_index];
+                    self.curr_function_context_mut().instruction_pointer = offset;
+                }
+            }
+            Instruction::JumpFalse(label_ref) => {
+                let label_ref_index = label_ref.0 as usize;
+                let object = self.pop_resolve();
+                let value = match object {
+                    Object::Number(v) => v.as_bool(),
+                    _ => return Err(AnalyzeError::GenericError("not a bool")),
+                };
+                if !value {
                     let offset = self.curr_function().label_offsets[label_ref_index];
                     self.curr_function_context_mut().instruction_pointer = offset;
                 }
@@ -511,7 +525,24 @@ macro_rules! binary_number_operation {
     ($operation_name:ident) => {
         fn $operation_name(self, other: Object) -> AnalyzeResult<Object> {
             Ok(match (self, other) {
-                (Object::Number(a), Object::Number(b)) => Object::Number(a.multiply(b)),
+                (Object::Number(a), Object::Number(b)) => Object::Number(a.$operation_name(b)),
+                (s, o) => {
+                    return Err(AnalyzeError::InvalidBinaryOperation(
+                        stringify!($operation_name),
+                        s,
+                        o,
+                    ))
+                }
+            })
+        }
+    };
+}
+
+macro_rules! binary_number_result_operation {
+    ($operation_name:ident) => {
+        fn $operation_name(self, other: Object) -> AnalyzeResult<Object> {
+            Ok(match (self, other) {
+                (Object::Number(a), Object::Number(b)) => Object::Number(a.$operation_name(b)?),
                 (s, o) => {
                     return Err(AnalyzeError::InvalidBinaryOperation(
                         stringify!($operation_name),
@@ -591,17 +622,17 @@ impl Object {
     binary_number_operation!(divide);
     binary_number_operation!(modulus);
     binary_number_operation!(subtract);
-    binary_number_operation!(left_shift);
-    binary_number_operation!(right_shift);
+    binary_number_result_operation!(left_shift);
+    binary_number_result_operation!(right_shift);
     binary_number_operation!(less_than);
     binary_number_operation!(less_than_or_equal);
     binary_number_operation!(more_than);
     binary_number_operation!(more_than_or_equal);
     binary_number_operation!(equal);
     binary_number_operation!(not_equal);
-    binary_number_operation!(bitwise_and);
-    binary_number_operation!(bitwise_xor);
-    binary_number_operation!(bitwise_or);
+    binary_number_result_operation!(bitwise_and);
+    binary_number_result_operation!(bitwise_xor);
+    binary_number_result_operation!(bitwise_or);
     binary_number_operation!(logical_and);
     binary_number_operation!(logical_or);
 }
