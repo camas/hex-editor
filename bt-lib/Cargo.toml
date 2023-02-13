@@ -1,0 +1,15 @@
+[package]
+# TODO: Pick a better name. Remove the '-lib' part
+name = "bt-lib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+log = "*"
+pest = "*"
+pest_derive = "*"
+num = "*"
+num-traits = "*"
+thiserror = "*"
+lazy_static = "*"

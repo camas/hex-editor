@@ -1,0 +1,30 @@
+use crate::parse::parse_bt;
+
+use super::transform;
+
+#[test]
+fn test_expressions() {
+    let input = r#"
+        local int a = 1, b = 2, c = 3;
+        a + b + c;
+
+        void d(int a) {
+            Printf("%d\n", a);
+        }
+
+        d(1,2);
+
+        int e;
+        int e;
+
+        local int a = 0.1 ? 3 : 4;
+
+        i64 a[10];
+        "#;
+
+    let parsed = parse_bt(input).unwrap();
+    println!("{:#?}", parsed);
+
+    let result = transform(parsed).unwrap();
+    println!("{:#?}", result);
+}

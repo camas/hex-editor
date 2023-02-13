@@ -1,0 +1,35 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+bt-lib = { path = "../bt-lib" }
+log = "*"
+wasm-logger = "*"
+console_error_panic_hook = "*"
+sycamore = { version = "*", features = ["suspense"] }
+sycamore-futures = "*"
+web-sys = { version = "*", features = [
+    "ClipboardEvent",
+    "DataTransfer",
+    "DataTransferItem",
+    "DataTransferItemList",
+    "DragEvent",
+    "Element",
+    "File",
+    "FileList",
+    "HtmlElement",
+    "HtmlInputElement",
+    "WheelEvent",
+] }
+js-sys = "*"
+wasm-bindgen = "*"
+wasm-bindgen-futures = "*"
+uuid = { version = "*", features = ["js", "v4"] }
+xxhash-rust = { version = "*", features = ["xxh3"] }
+lexical = { version = "*", features = ["write-integers", "radix", "format"] }
+num = "*"
+# TODO: Change when automatic_layout stable
+monaco = { git = "https://github.com/siku2/rust-monaco" }

@@ -1,0 +1,185 @@
+.hexview {
+    display: grid;
+    overflow-y: hidden;
+    grid-template-columns: min-content repeat(16, 32px) 6px repeat(16, 10px);
+    padding: 0px 8px 8px 8px;
+}
+
+.hexview-header {
+    display: grid;
+    grid-template-columns: subgrid;
+}
+
+.hexview-header-filename-row {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    height: 20px;
+}
+
+.hexview-header-filename {
+    grid-column: 2 / span 16;
+}
+
+.hexview-header-fileinput {
+    display: none;
+}
+
+.hexview-header-offsets-container {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    height: 20px;
+}
+
+.hexview-header-offsets {
+    grid-column: 2 / span 16;
+    display: grid;
+    grid-template-columns: subgrid;
+}
+
+.hexview-header-offset {
+    color: #9d9d9d;
+    width: 32px;
+    text-align: center;
+}
+
+.hexview-header-offset:nth-child(4n) {
+    border-right: 1px solid #5e5e5e;
+}
+
+.hexview-header-offset:last-child {
+    border-right: 0px;
+}
+
+.hexview-header-text-offsets {
+    grid-column: 19 / span 16;
+    display: grid;
+    grid-template-columns: subgrid;
+}
+
+.hexview-header-textoffset {
+    color: #9d9d9d;
+    width: 10px;
+    text-align: center;
+}
+
+.hexview-rows {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    height: 100%;
+    overflow: hidden;
+}
+
+.hexview-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    height: 18px;
+}
+
+.hexview-row-even > .hexview-row-bytes,
+.hexview-row-even > .hexview-row-chars {
+    background-color: #151515;
+}
+
+.hexview-row-odd > .hexview-row-bytes,
+.hexview-row-odd > .hexview-row-chars {
+    background-color: #222222;
+}
+
+.hexview-row-selected {
+    background-color: #0077ff55;
+}
+
+.hexview-row-header {
+    // width: 100px;
+    grid-column: 1;
+    text-align: right;
+    color: rgb(157, 157, 157);
+    margin-right: 10px;
+}
+
+.hexview-row-selected > .hexview-row-header {
+    color: #eeeeee;
+}
+
+.hexview-row-bytes {
+    grid-column: 2 / span 16;
+    display: grid;
+    grid-template-columns: subgrid;
+    cursor: text;
+}
+
+.hexview-row-char-container,
+.hexview-row-byte-container {
+    display: grid;
+}
+
+.hexview-row-char-container > *,
+.hexview-row-byte-container > * {
+    grid-area: 1 / 1 / -1 / -1;
+    pointer-events: none;
+}
+
+.hexview-row-byte-container {
+    user-select: none;
+    width: 32px;
+    text-align: center;
+    appearance: none;
+}
+
+.hexview-row-byte-zero,
+.hexview-row-char-zero {
+    color: #555555;
+}
+
+.hexview-row-byte-selected,
+.hexview-row-char-selected {
+    color: #eeeeee;
+    background-color: #0077ff77;
+}
+
+.hexview-row-byte-selected.hexview-row-byte-zero,
+.hexview-row-char-selected.hexview-row-char-zero {
+    color: #888888;
+}
+
+.hexview-row-byte-container:nth-child(4n) {
+    border-right: 1px solid #5e5e5e;
+}
+
+.hexview-row-byte-container:last-child {
+    border-right: 0px;
+}
+
+.hexview-row-chars {
+    grid-column: 19 / span 16;
+    display: grid;
+    grid-template-columns: subgrid;
+    cursor: text;
+}
+
+.hexview-row-char {
+    user-select: none;
+    width: 10px;
+    appearance: none;
+}
+
+.hexview-row-byte-input {
+    border: none;
+    display: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 0;
+    width: 100%;
+    text-align: inherit;
+    background: none;
+    color: inherit;
+    user-select: text;
+}

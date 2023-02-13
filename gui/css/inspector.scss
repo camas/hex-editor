@@ -1,0 +1,22 @@
+.inspector {
+    overflow: hidden;
+}
+
+// TODO: Change to grid
+.inspector-content {
+    display: table;
+    table-layout: fixed;
+}
+
+.inspector-content-row {
+    display: table-row;
+}
+
+.inspector-content-row-header {
+    display: table-cell;
+    width: 100px;
+}
+
+.inspector-content-row-data {
+    display: table-cell;
+}

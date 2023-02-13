@@ -1,0 +1,10 @@
+[package]
+name = "blade-analyzer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+linked-hash-map = "*"
+
+[workspace]
+members = [".", "bt-lib", "common", "gui"]

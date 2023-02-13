@@ -1,0 +1,257 @@
+COMMENT = _{ 
+    ("/*" ~ ANY* ~ "*/") // Block comment
+    | ("//" ~ (!"\n" ~ ANY)*) // Line comment
+}
+WHITESPACE = _{ " " | "\t" | "\r\n" | "\n" }
+
+Program = _{ SOI ~ Statement* ~ EOI }
+
+// Statements
+Statement = {
+    Return
+    | ReturnVoid
+    | Break
+    | Continue
+    | Switch
+    | If
+    | While
+    | DoWhile
+    | For
+    | BasicTypedef
+    | DeclareEnum
+    | DeclareForwardStruct
+    | DeclareStruct
+    | DeclareFunction
+    | DeclareUnion
+    | Declare
+    | (Expression ~ ";")
+}
+
+BasicTypedef = { "typedef" ~ Identifier ~ Identifier ~ ";" }
+
+Switch = { "switch" ~ "(" ~ Expression ~ ")" ~ "{" ~ SwitchEntry* ~ "}" }
+SwitchEntry = { (("case" ~ Expression) | Default) ~ ":" ~ BasicStatements }
+Default = { "default" }
+
+Break = { "break" ~ ";" }
+Continue = { "continue" ~ ";" }
+
+If = { 
+    "if" ~ "(" ~ Expression ~ ")" ~ Statements 
+    ~ ElseIf*
+    ~ Else?
+}
+ElseIf = { "else" ~ "if" ~ "(" ~ Expression ~ ")" ~ Statements }
+Else = { "else" ~ Statements }
+
+While = { "while" ~ "(" ~ Expression ~ ")" ~ Statements }
+
+For = { "for" ~ "(" ~ OptionalExpression ~ ";" ~ OptionalExpression ~ ";" ~ OptionalExpression ~ ")" ~ Statements }
+OptionalExpression = { Expression? }
+
+DoWhile = { "do" ~ Statements ~ "while" ~ "(" ~ Expression ~ ")" ~ ";" }
+
+Statements = { Statement | ("{" ~ Statement* ~ "}") }
+BasicStatements = { Statement* }
+
+DeclareFunction = {
+    TypeDeclaration ~ Identifier ~ "(" ~ DeclareFunctionArgs ~ ")" 
+    ~ "{" ~ DeclareFunctionStatements ~ "}"
+}
+DeclareFunctionArgs = { (DeclareFunctionArg ~ ("," ~ DeclareFunctionArg)*)? }
+DeclareFunctionArg = { "local"? ~ TypeDeclaration ~ FunctionArgRef? ~ Identifier }
+FunctionArgRef = { "&" }
+DeclareFunctionStatements = { Statement* }
+
+DeclareEnum = { Typedef? ~ "enum" ~ EnumType? ~ Identifier? ~ "{" ~ EnumDeclares ~ "}" ~ Identifier? ~ Attributes? ~ ";" }
+EnumType = { "<" ~ Identifier ~ ">" }
+EnumDeclares = { (EnumDeclare ~ ("," ~ EnumDeclare)* ~ ","?)? }
+EnumDeclare = { Identifier ~ ("=" ~ Expression)? }
+
+DeclareForwardStruct = { "struct" ~ Identifier ~ ";" }
+
+DeclareStruct = { Typedef? ~ "struct" ~ Identifier? ~ StructArgs? ~ "{" ~ StructStatements ~ "}" ~ Identifier? ~ Attributes? ~ ";" }
+StructArgs = { "(" ~ (DeclareFunctionArg ~ ("," ~ DeclareFunctionArg)*)? ~ ")" }
+StructStatements = { Statement* }
+
+DeclareUnion = { Typedef? ~ "union" ~ Identifier? ~ "{" ~ StructStatements ~ "}" ~ Identifier? ~ Attributes? ~ ";" }
+
+Declare = { Local? ~ Identifier ~ DeclareInner ~ ("," ~ DeclareInner)* ~ ";" }
+Local = { "local" }
+DeclareInner = { TypeDeclaration ~ DeclareInnerArgs? ~ Attributes? ~ DeclareAssignment? }
+DeclareInnerArgs = { "(" ~ (Expression ~ ("," ~ Expression)*) ~ ")" }
+DeclareAssignment = { "=" ~ (Expression | ArrayExpression) }
+
+Return = { "return" ~ Expression ~ ";" }
+ReturnVoid = { "return" ~ ";" }
+
+Attributes = { "<" ~ (Attribute ~ ("," ~ Attribute)*)? ~ ">" }
+Attribute = { Identifier ~ "=" ~ AttributeValue }
+AttributeValue = _{
+    String
+    | Character
+    | Number
+    | Identifier
+}
+ArrayExpression = { "{" ~ Expression ~ ("," ~ Expression)* ~ "}" }
+
+Typedef = { "typedef" }
+
+TypeDeclaration = {
+    ArrayIdentifier
+    | UnsizedArrayIdentifier
+    | Identifier
+}
+ArrayIdentifier = { Identifier ~ "[" ~ Expression ~ "]" }
+UnsizedArrayIdentifier = { Identifier ~ "[" ~ "]" }
+
+// Expressions
+Expression = { Prefix* ~ Primary ~ Postfix* ~ (Infix ~ Prefix* ~ Primary ~ Postfix*)* }
+Prefix = _{
+    PreIncrement
+    | PreDecrement
+    | PreAdd
+    | PreSubtract
+    | LogicalNot
+    | BitwiseNot
+    | Cast
+}
+Cast = { "(" ~ Identifier ~ ")" }
+Postfix = _{
+    Increment
+    | Decrement
+    | CallFunction
+    | GetArrayIndex
+    | GetMember
+}
+CallFunction = { "(" ~ (Expression ~ ("," ~ Expression)*)? ~ ")" }
+GetArrayIndex = { "[" ~ Expression ~ "]" }
+GetMember = { "." ~ Identifier }
+Infix = _{
+    // Assign* need to be on top so they aren't overridden by the basic operators
+    AssignAdd
+    | AssignSubtract
+    | AssignMultiply
+    | AssignDivide
+    | AssignModulus
+    | AssignLeftShift
+    | AssignRightShift
+    | AssignBitwiseAnd
+    | AssignBitwiseXor
+    | AssignBitwiseOr
+    | Multiply
+    | Divide
+    | Modulus
+    | Add
+    | Subtract
+    | LeftShift
+    | RightShift
+    | LessThan
+    | LessThanOrEqual
+    | MoreThan
+    | MoreThanOrEqual
+    | Equal
+    | NotEqual
+    | LogicalAnd
+    | LogicalOr
+    | BitwiseAnd
+    | BitwiseXor
+    | BitwiseOr
+    | Ternary
+    | Assign
+}
+Ternary = { "?" ~ Expression ~ ":" }
+Primary = _{
+    WideString
+    | String
+    | Character
+    | Number
+    | ("(" ~ Expression ~ ")")
+    | Identifier
+}
+
+// Operator symbols
+PreIncrement = { "++" }
+PreDecrement = { "--" }
+Increment = { "++" }
+Decrement = { "--" }
+Add = { "+" }
+Subtract = { "-" }
+PreAdd = { "+" }
+PreSubtract = { "-" }
+LogicalNot = { "!" }
+BitwiseNot = { "~" }
+Multiply = { "*" }
+Divide = { "/" }
+Modulus = { "%" }
+LeftShift = { "<<" }
+RightShift = { ">>" }
+LessThan = { "<" }
+LessThanOrEqual = { "<=" }
+MoreThan = { ">" }
+MoreThanOrEqual = { ">=" }
+Equal = { "==" }
+NotEqual = { "!=" }
+BitwiseAnd = { "&" }
+BitwiseXor = { "^" }
+BitwiseOr = { "|" }
+LogicalAnd = { "&&" }
+LogicalOr = { "||" }
+Assign = { "=" }
+AssignAdd = { "+=" }
+AssignSubtract = { "-=" }
+AssignMultiply = { "*=" }
+AssignDivide = { "/=" }
+AssignModulus = { "%=" }
+AssignLeftShift = { "<<=" }
+AssignRightShift = { ">>=" }
+AssignBitwiseAnd = { "&=" }
+AssignBitwiseXor = { "^=" }
+AssignBitwiseOr = {" |=" }
+
+// Identifier - Variable names, function names etc.
+Identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+// A string enclosed in double quotes
+String = @{ "\"" ~ ( "\\\\" | "\\\"" | (!"\"" ~ ANY))* ~ "\"" }
+WideString = @{ "L" ~ String }
+
+// A single character enclosed in single quotes
+Character = @{ "'" ~ ( "\\\\" | "\\'" | (!"'" ~ ANY)) ~ "'" }
+
+// All number types
+// https://www.sweetscape.com/010editor/manual/NumberSystems.htm
+Number = ${ 
+    Boolean
+    | UnsignedLongIntNumber
+    | UnsignedIntNumber
+    | LongIntNumber
+    | SmallFloatNumber
+    | FloatNumber
+    | IntNumber
+}
+
+Boolean = { True | False }
+True = { "true" }
+False = { "false" }
+
+IntNumber = {
+    BinaryNumber
+    | HexNumber
+    | OctalNumber
+    | DecimalNumber
+}
+UnsignedIntNumber = { IntNumber ~ "u" }
+LongIntNumber = { IntNumber ~ "L" }
+UnsignedLongIntNumber = { IntNumber ~ ("uL" | "Lu") }
+
+DecimalNumber = @{ ASCII_DIGIT+ }
+BinaryNumber = @{ "0b" ~ ("0" | "1")+ }
+HexNumber = @{ 
+    ("0x" ~ HexNumberChar+)
+    | (ASCII_DIGIT ~ HexNumberChar* ~ "h")
+}
+HexNumberChar = @{ ASCII_DIGIT | "a" | "b" | "c" | "d" | "e" | "f" | "A" | "B" | "C" | "D" | "E" | "F" }
+OctalNumber = @{ ("0o" | "0") ~ ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7")+ }
+FloatNumber = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+? ~ ("e" ~ "-"? ~ ASCII_DIGIT+)? }
+SmallFloatNumber = { FloatNumber ~ "f" }

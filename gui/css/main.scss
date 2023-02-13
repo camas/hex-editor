@@ -1,0 +1,42 @@
+@use "hexview";
+@use "inspector";
+@use "parsed";
+@use "scripteditor";
+
+// * {
+//     outline: 1px solid red;
+// }
+
+html,
+body {
+    background-color: rgb(47, 47, 47);
+    color: rgb(203, 203, 203);
+}
+
+.app {
+    height: 100vh;
+    width: 100vw;
+    padding: 0px;
+    margin: 0px;
+    font-family: courier new;
+    font-size: 16px;
+    display: grid;
+    grid-template-columns: 300px min-content 1fr;
+    grid-template-rows: auto 200px;
+}
+
+.app > .inspector {
+    grid-area: 1 / 1 / -1 / 2;
+}
+
+.app > .hexview {
+    grid-area: 1 / 2 / 1 / 2;
+}
+
+.app > .scripteditor {
+    grid-area: 1 / 3 / 1 / 3;
+}
+
+.app > .parsed {
+    grid-area: 2 / 2 / 2 / span 2;
+}
