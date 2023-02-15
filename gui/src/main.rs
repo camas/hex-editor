@@ -1,4 +1,5 @@
 #![feature(int_roundings)]
+#![feature(iter_intersperse)]
 
 use std::{io::Cursor, num::Wrapping};
 
@@ -112,6 +113,7 @@ Open file by:
                
 "
     .to_vec();
+
     let provider = DataSource::new(Box::new(Cursor::new(data)));
     let data_info = create_signal(
         cx,

@@ -40,9 +40,7 @@ impl ParsedObjects {
         end: u64,
         background_color: Option<u32>,
     ) {
-        // TODO: Colors
-        // TODO: Store type (either in name or extra field)
-        // TODO: Store array info
+        // TODO: Combine same name and type into array
         self.objects.push(ParsedObject {
             name: variable_name,
             value,

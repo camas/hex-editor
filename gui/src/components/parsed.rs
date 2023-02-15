@@ -77,7 +77,7 @@ fn parsed_row<G: Html>(cx: Scope, row_info: RowData) -> View<G> {
     view! {cx,
         div(class="parsed-row") {
             div(){(name)}
-            div(){(value)}
+            div(class="parsed-row-value"){(value)}
             div(){(type_string)}
             div(){(format!("{:#x} - {:#x}", row_info.start, row_info.end))}
             div(){(row_info.size().to_string())}
@@ -114,17 +114,21 @@ impl RowData {
                 bt_lib::Number::F32(v) => ("f32".to_string(), format!("{:.8}", v)),
                 bt_lib::Number::F64(v) => ("f64".to_string(), format!("{:.8}", v)),
             },
-            analyze::Object::CharArray(_) => todo!(),
-            analyze::Object::U8Array(_) => todo!(),
-            analyze::Object::I8Array(_) => todo!(),
-            analyze::Object::I16Array(_) => todo!(),
-            analyze::Object::U16Array(_) => todo!(),
-            analyze::Object::U32Array(_) => todo!(),
-            analyze::Object::I32Array(_) => todo!(),
-            analyze::Object::U64Array(_) => todo!(),
-            analyze::Object::I64Array(_) => todo!(),
-            analyze::Object::F32Array(_) => todo!(),
-            analyze::Object::F64Array(_) => todo!(),
+            analyze::Object::CharArray(v) => (
+                format!("char[{}]", v.len()),
+                String::from_utf8_lossy(&v.iter().cloned().take(10).collect::<Vec<_>>())
+                    .into_owned(),
+            ),
+            analyze::Object::U8Array(v) => (format!("u8[{}]", v.len()), array_value_str(v)),
+            analyze::Object::I8Array(v) => (format!("i8[{}]", v.len()), array_value_str(v)),
+            analyze::Object::U16Array(v) => (format!("u16[{}]", v.len()), array_value_str(v)),
+            analyze::Object::I16Array(v) => (format!("i16[{}]", v.len()), array_value_str(v)),
+            analyze::Object::U32Array(v) => (format!("u32[{}]", v.len()), array_value_str(v)),
+            analyze::Object::I32Array(v) => (format!("i32[{}]", v.len()), array_value_str(v)),
+            analyze::Object::U64Array(v) => (format!("u64[{}]", v.len()), array_value_str(v)),
+            analyze::Object::I64Array(v) => (format!("i64[{}]", v.len()), array_value_str(v)),
+            analyze::Object::F32Array(v) => (format!("f32[{}]", v.len()), array_value_str(v)),
+            analyze::Object::F64Array(v) => (format!("f64[{}]", v.len()), array_value_str(v)),
             analyze::Object::VariableRef(_) => unreachable!(),
         };
         RowData {
@@ -140,5 +144,27 @@ impl RowData {
 
     fn size(&self) -> u64 {
         self.end - self.start + 1
+    }
+}
+
+fn array_value_str<T>(values: &[T]) -> String
+where
+    T: ToString,
+{
+    const TAKE_COUNT: usize = 10;
+    if values.len() < TAKE_COUNT {
+        values
+            .iter()
+            .map(|v| v.to_string())
+            .intersperse(", ".to_string())
+            .collect()
+    } else {
+        values
+            .iter()
+            .take(TAKE_COUNT)
+            .map(|v| v.to_string())
+            .intersperse(", ".to_string())
+            .chain(std::iter::once("...".to_string()))
+            .collect()
     }
 }

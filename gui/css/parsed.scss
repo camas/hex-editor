@@ -39,6 +39,7 @@
     grid-column: 1 / -1;
     display: grid;
     grid-template-columns: subgrid;
+    height: 20px;
 }
 
 .parsed-row > * {
@@ -54,4 +55,8 @@
 .parsed-row-color > * {
     height: 100%;
     width: 100%;
+}
+
+.parsed-row-value {
+    text-overflow: ellipsis;
 }

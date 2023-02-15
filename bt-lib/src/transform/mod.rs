@@ -79,8 +79,10 @@ pub enum Instruction {
     DeclareObject {
         variable_ref: VariableRef,
         object_ref: ObjectRef,
-        arg_count: usize,
-        attributes: Vec<Attribute>,
+    },
+    DeclareArray {
+        variable_ref: VariableRef,
+        object_ref: ObjectRef,
     },
     /// Object declaration by reading from data
     ReadObject {
@@ -88,6 +90,12 @@ pub enum Instruction {
         variable_ref: VariableRef,
         object_ref: ObjectRef,
         arg_count: usize,
+        attributes: Vec<Attribute>,
+    },
+    ReadArray {
+        name: String,
+        variable_ref: VariableRef,
+        object_ref: ObjectRef,
         attributes: Vec<Attribute>,
     },
     /// Cast top of stack to target object (Replaces)
@@ -411,33 +419,74 @@ fn transform_statement(
             attributes,
         } => {
             let variable_ref = context.create_variable_ref(name.clone())?;
-            let arg_count = args.len();
 
-            let attributes = if local {
+            if local {
                 if !attributes.is_empty() {
                     return Err(TransformError::Generic(
                         "local variables can't have attributes",
                     ));
                 }
-                Vec::new()
+
+                match object_type {
+                    TypeDeclaration::Normal(object_type) => {
+                        context.queue_instruction(Instruction::DeclareObject {
+                            variable_ref,
+                            object_ref: context.initializable_ref(object_type)?,
+                        })
+                    }
+                    TypeDeclaration::Array {
+                        name: object_type,
+                        size,
+                    } => {
+                        context.queue_instruction(Instruction::DeclareArray {
+                            variable_ref,
+                            object_ref: context.initializable_ref(object_type)?,
+                        });
+                        context.queue_expression(size);
+                    }
+                    TypeDeclaration::UnsizedArray { .. } => {
+                        return Err(TransformError::DeclareUnsizedArray)
+                    }
+                }
             } else {
-                transform_attributes(context, attributes)
-            };
+                let arg_count = args.len();
+                if arg_count != 0 {
+                    todo!("Args not implemented yet");
+                }
 
-            let decl_instr = create_declare_instruction(
-                context,
-                name,
-                variable_ref,
-                object_type,
-                local,
-                attributes,
-                arg_count,
-            )?;
+                let attributes = transform_attributes(context, attributes);
 
-            context.add_instruction(decl_instr);
+                // for arg_expression in args {
+                //     context.queue_expression(arg_expression);
+                // }
 
-            for arg_expression in args {
-                context.queue_expression(arg_expression);
+                match object_type {
+                    TypeDeclaration::Normal(object_type) => {
+                        let object_ref = context.initializable_ref(object_type)?;
+                        context.queue_instruction(Instruction::ReadObject {
+                            name,
+                            variable_ref,
+                            object_ref,
+                            arg_count,
+                            attributes,
+                        });
+                    }
+                    TypeDeclaration::Array {
+                        name: object_type,
+                        size,
+                    } => {
+                        context.queue_instruction(Instruction::ReadArray {
+                            name,
+                            variable_ref,
+                            object_ref: context.initializable_ref(object_type)?,
+                            attributes,
+                        });
+                        context.queue_expression(size);
+                    }
+                    TypeDeclaration::UnsizedArray { .. } => {
+                        return Err(TransformError::DeclareUnsizedArray)
+                    }
+                }
             }
         }
         Statement::DeclareMultiple(statements) => {
@@ -455,7 +504,6 @@ fn transform_statement(
             if !local {
                 return Err(TransformError::AssignNonLocalVariable);
             }
-            let variable_ref = context.create_variable_ref(name.clone())?;
 
             if !attributes.is_empty() {
                 return Err(TransformError::Generic(
@@ -463,20 +511,32 @@ fn transform_statement(
                 ));
             }
 
-            let decl_instr = create_declare_instruction(
-                context,
-                name,
-                variable_ref,
-                object_type,
-                local,
-                Vec::new(),
-                0,
-            )?;
-
-            context.add_instruction(decl_instr);
+            let variable_ref = context.create_variable_ref(name.clone())?;
 
             context.queue_instruction(Instruction::PopVariable(variable_ref));
             context.queue_expression(value);
+
+            match object_type {
+                TypeDeclaration::Normal(object_type) => {
+                    context.queue_instruction(Instruction::DeclareObject {
+                        variable_ref,
+                        object_ref: context.initializable_ref(object_type)?,
+                    })
+                }
+                TypeDeclaration::Array {
+                    name: object_type,
+                    size,
+                } => {
+                    context.queue_expression(size);
+                    context.queue_instruction(Instruction::DeclareArray {
+                        variable_ref,
+                        object_ref: context.initializable_ref(object_type)?,
+                    });
+                }
+                TypeDeclaration::UnsizedArray { .. } => {
+                    return Err(TransformError::DeclareUnsizedArray)
+                }
+            }
         }
         Statement::Expression(expression) => {
             context.queue_instruction(Instruction::Pop);
@@ -665,7 +725,7 @@ fn transform_attributes(
     attributes
 }
 
-fn create_declare_instruction(
+fn __create_declare_instruction(
     context: &mut TransformContext,
     name: String,
     variable_ref: VariableRef,
@@ -678,11 +738,11 @@ fn create_declare_instruction(
         TypeDeclaration::Normal(object_type) => {
             let object_ref = context.initializable_ref(object_type)?;
             if local {
+                assert_eq!(arg_count, 0);
+                assert!(attributes.is_empty());
                 Instruction::DeclareObject {
                     variable_ref,
                     object_ref,
-                    arg_count,
-                    attributes,
                 }
             } else {
                 Instruction::ReadObject {
@@ -697,7 +757,14 @@ fn create_declare_instruction(
         TypeDeclaration::Array {
             name: object_type,
             size,
-        } => todo!(),
+        } => {
+            let object_ref = context.initializable_ref(object_type)?;
+            if local {
+                todo!()
+            } else {
+                todo!()
+            }
+        }
         TypeDeclaration::UnsizedArray { .. } => return Err(TransformError::DeclareUnsizedArray),
     })
 }
@@ -823,7 +890,7 @@ fn transform_expression(
             Number::F32(value) => Instruction::PushF32(value),
             Number::F64(value) => Instruction::PushF64(value),
         }),
-        Expression::DeclareArrayValue(array_values) => {
+        Expression::DeclareArrayValues(array_values) => {
             let array_value_count = array_values.len();
 
             context.queue_instruction(Instruction::DeclareArrayValues(array_value_count));

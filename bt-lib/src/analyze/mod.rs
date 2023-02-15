@@ -1,6 +1,7 @@
 use std::{collections::HashMap, io::SeekFrom, num::Wrapping, rc::Rc};
 
 use common::{DataSourceTraits, Reader};
+use log::debug;
 
 use crate::{
     parse::{BasicObject, FunctionArg, ObjectRef, Statement},
@@ -70,6 +71,8 @@ pub enum Object {
     F32Array(Rc<Vec<f32>>),
     F64Array(Rc<Vec<f64>>),
     VariableRef(VariableRef),
+    // TODO: Add reference arrays that only read values if needed.
+    // Check if necessary first. Might not speed up performance much at all
 }
 
 #[derive(Debug)]
@@ -215,19 +218,7 @@ impl<'a> ExecutionContext<'a> {
             Instruction::DeclareObject {
                 variable_ref,
                 object_ref,
-                arg_count,
-                attributes,
             } => {
-                // TODO: Handle these when transforming
-                if *arg_count != 0 {
-                    return Err(AnalyzeError::GenericError("Basic types dont have args"));
-                }
-                if !(attributes.is_empty()) {
-                    return Err(AnalyzeError::GenericError(
-                        "Basic types don't have attributes",
-                    ));
-                }
-
                 let object = match object_ref {
                     ObjectRef::Basic(basic_type) => match basic_type {
                         BasicObject::U8 => Object::Number(Number::U8(Wrapping(0))),
@@ -245,6 +236,35 @@ impl<'a> ExecutionContext<'a> {
                     _ => return Err(AnalyzeError::GenericError("invalid local declaration type")),
                 };
                 self.set_variable(*variable_ref, object);
+            }
+            Instruction::DeclareArray {
+                variable_ref,
+                object_ref,
+            } => {
+                let variable_ref = *variable_ref;
+                let object_ref = *object_ref;
+
+                let size = match self.pop_resolve() {
+                    Object::Number(v) => v.as_u64(),
+                    _ => return Err(AnalyzeError::GenericError("Invalid type for array size")),
+                } as usize;
+                let object = match object_ref {
+                    ObjectRef::Basic(basic) => match basic {
+                        BasicObject::U8 => Object::U8Array(Rc::new(vec![0; size])),
+                        BasicObject::I8 => Object::I8Array(Rc::new(vec![0; size])),
+                        BasicObject::U16 => Object::U16Array(Rc::new(vec![0; size])),
+                        BasicObject::I16 => Object::I16Array(Rc::new(vec![0; size])),
+                        BasicObject::U32 => Object::U32Array(Rc::new(vec![0; size])),
+                        BasicObject::I32 => Object::I32Array(Rc::new(vec![0; size])),
+                        BasicObject::U64 => Object::U64Array(Rc::new(vec![0; size])),
+                        BasicObject::I64 => Object::I64Array(Rc::new(vec![0; size])),
+                        BasicObject::F32 => Object::F32Array(Rc::new(vec![0.; size])),
+                        BasicObject::F64 => Object::F64Array(Rc::new(vec![0.; size])),
+                        BasicObject::String => todo!(),
+                    },
+                    _ => todo!(),
+                };
+                self.set_variable(variable_ref, object);
             }
             Instruction::ReadObject {
                 name,
@@ -270,6 +290,35 @@ impl<'a> ExecutionContext<'a> {
 
                 let start = self.reader.position()?;
                 let value = self.read_object(object_ref)?;
+                let end = self.reader.position()?.max(start + 1) - 1;
+
+                self.set_variable(variable_ref, value.clone());
+                self.parsed_objects.add(name, value, start, end, bg_color);
+            }
+            Instruction::ReadArray {
+                name,
+                variable_ref,
+                object_ref,
+                attributes,
+            } => {
+                let variable_ref = *variable_ref;
+                let object_ref = *object_ref;
+                let name = name.clone();
+
+                let mut bg_color = None;
+                for attribute in attributes {
+                    match attribute {
+                        Attribute::BackgroundColor(v) => bg_color = Some(*v),
+                    }
+                }
+
+                let size = match self.pop_resolve() {
+                    Object::Number(v) => v.as_u64(),
+                    _ => return Err(AnalyzeError::GenericError("Invalid type for array size")),
+                } as usize;
+
+                let start = self.reader.position()?;
+                let value = self.read_array(object_ref, size)?;
                 let end = self.reader.position()?.max(start + 1) - 1;
 
                 self.set_variable(variable_ref, value.clone());
@@ -339,8 +388,7 @@ impl<'a> ExecutionContext<'a> {
             }
             Instruction::JumpTrue(label_ref) => {
                 let label_ref_index = label_ref.0 as usize;
-                let object = self.pop_resolve();
-                let value = match object {
+                let value = match self.pop_resolve() {
                     Object::Number(v) => v.as_bool(),
                     _ => return Err(AnalyzeError::GenericError("not a bool")),
                 };
@@ -351,8 +399,7 @@ impl<'a> ExecutionContext<'a> {
             }
             Instruction::JumpFalse(label_ref) => {
                 let label_ref_index = label_ref.0 as usize;
-                let object = self.pop_resolve();
-                let value = match object {
+                let value = match self.pop_resolve() {
                     Object::Number(v) => v.as_bool(),
                     _ => return Err(AnalyzeError::GenericError("not a bool")),
                 };
@@ -439,6 +486,65 @@ impl<'a> ExecutionContext<'a> {
                     }
                     Object::CharArray(Rc::new(value))
                 }
+            },
+            _ => todo!(),
+        })
+    }
+
+    fn read_array(&mut self, object_ref: ObjectRef, size: usize) -> AnalyzeResult<Object> {
+        Ok(match object_ref {
+            ObjectRef::Basic(basic) => match basic {
+                BasicObject::U8 => Object::U8Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_u8())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::I8 => Object::I8Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_i8())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::U16 => Object::U16Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_u16())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::I16 => Object::I16Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_i16())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::U32 => Object::U32Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_u32())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::I32 => Object::I32Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_i32())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::U64 => Object::U64Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_u64())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::I64 => Object::I64Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_i64())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::F32 => Object::F32Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_f32())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::F64 => Object::F64Array(Rc::new(
+                    (0..size)
+                        .map(|_| self.reader.read_f64())
+                        .collect::<std::io::Result<Vec<_>>>()?,
+                )),
+                BasicObject::String => todo!(),
             },
             _ => todo!(),
         })

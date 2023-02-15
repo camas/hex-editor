@@ -21,7 +21,18 @@ pub fn ScriptEditor<G: Html>(cx: Scope) -> View<G> {
         if let Some(monaco_ref) = monaco_ref.try_get::<DomNode>() {
             if let Some(element) = monaco_ref.to_web_sys().dyn_ref::<HtmlElement>() {
                 let editor = CodeEditor::create(element, Some(get_options()));
+                editor.get_model().unwrap().set_value(
+                    "// Example script
+                    
+u8 a[53]<color=0x000000>;
+u8 b[6]<color=0xff0000>;
+u8 a[8]<color=0x000000>;
+u8 a[10]<color=0xff0000>;
+u8 a[35]<color=0x000000>;
+",
+                );
                 editor_signal.set(Some(editor));
+                run_requested_signal.set(RunRequested);
             }
         }
     });

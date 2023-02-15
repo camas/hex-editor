@@ -322,7 +322,7 @@ fn parse_statement_declaration() {
                 },
                 name: "a".to_string(),
                 attributes: Vec::new(),
-                value: Expression::DeclareArrayValue(vec![ident("c"), ident("d")]),
+                value: Expression::DeclareArrayValues(vec![ident("c"), ident("d")]),
             },
         ),
         (
@@ -343,7 +343,7 @@ fn parse_statement_declaration() {
                     },
                     name: "b".to_string(),
                     attributes: Vec::new(),
-                    value: Expression::DeclareArrayValue(vec![
+                    value: Expression::DeclareArrayValues(vec![
                         Expression::Number(Number::I32(1)),
                         Expression::Number(Number::I32(2)),
                     ]),

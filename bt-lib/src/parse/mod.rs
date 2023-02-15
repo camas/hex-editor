@@ -194,7 +194,7 @@ pub enum Expression {
     WideString(Vec<u8>),
     Char(i8),
     Number(Number),
-    DeclareArrayValue(Vec<Expression>),
+    DeclareArrayValues(Vec<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -791,7 +791,7 @@ fn parse_declare(pair: Pair<Rule>) -> Statement {
                                 .into_inner()
                                 .map(|p| parse_expression(p.into_inner()))
                                 .collect();
-                            Expression::DeclareArrayValue(values)
+                            Expression::DeclareArrayValues(values)
                         }
                         _ => unreachable!(),
                     })
