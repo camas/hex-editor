@@ -38,7 +38,7 @@ fn test_if_statement() {
             i32 b;
         }
     ";
-    test_program_output(program_str, data, vec![("b", Object::new_i32(1))]);
+    test_program_output(program_str, data, vec![("b", Object::new_i32(1))], b"");
 }
 
 #[test]
@@ -55,10 +55,38 @@ fn test_while_statement() {
         program_str,
         data,
         vec![("b", Object::new_u8(1)), ("b", Object::new_u8(2))],
+        b"",
     );
 }
 
-fn test_program_output(program_str: &str, data: Vec<u8>, expected_objects: Vec<(&str, Object)>) {
+#[test]
+fn function() {
+    let data = vec![];
+    let program_str = r#"
+        void a(i32 a, f32 b) {
+            Printf("Hello %d %f\n", a, b);
+        }
+
+        a(4, 5.3);
+    "#;
+
+    test_program_output(program_str, data, Vec::new(), b"Hello 4 5.3\n");
+}
+
+#[test]
+fn analyze_lenna() {
+    let data = std::fs::read("../bt-lib/test-resources/Lenna.png").unwrap();
+    let program = std::fs::read_to_string("../bt-lib/test-resources/PNG.bt").unwrap();
+
+    test_program_output(&program, data, Vec::new(), b"");
+}
+
+fn test_program_output(
+    program_str: &str,
+    data: Vec<u8>,
+    expected_objects: Vec<(&str, Object)>,
+    expected_stdout: &[u8],
+) {
     let program = transform(parse_bt(program_str).unwrap()).unwrap();
     println!("{:#?}", program);
 
@@ -78,16 +106,6 @@ fn test_program_output(program_str: &str, data: Vec<u8>, expected_objects: Vec<(
         assert_eq!(actual.name, expected.0);
         assert_eq!(actual.value, expected.1);
     }
-}
 
-#[test]
-fn analyze_lenna() {
-    // let data = std::fs::read("../bt-lib/test-resources/Lenna.png").unwrap();
-
-    // let program = transform(
-    //     parse_bt(std::fs::read_to_string("../bt-lib/test-resources/PNG.bt").unwrap()).unwrap(),
-    // )
-    // .unwrap();
-
-    // println!("{:#?}", analyze(&program, &data));
+    assert_eq!(result.stdout, expected_stdout);
 }

@@ -38,3 +38,13 @@ fn test_expressions() {
     let result = transform(parsed).unwrap();
     println!("{:#?}", result);
 }
+
+#[test]
+fn transform_bt() {
+    let input = std::fs::read_to_string("../bt-lib/test-resources/PNG.bt").unwrap();
+    let parsed = parse_bt(input).unwrap();
+    println!("{:#?}", parsed);
+
+    let result = transform(parsed).unwrap();
+    println!("{:#?}", result);
+}

@@ -20,6 +20,16 @@ macro_rules! read_primitive {
     };
 }
 
+macro_rules! read_primitive_be {
+    ($func_name:ident, $primitive:ident, $byte_count:expr) => {
+        pub fn $func_name(&mut self) -> io::Result<$primitive> {
+            Ok($primitive::from_be_bytes(
+                self.read_bytes($byte_count)?.try_into().unwrap(),
+            ))
+        }
+    };
+}
+
 impl<R: DataSourceTraits> Reader<R> {
     pub fn new(inner: R) -> Self {
         Reader {
@@ -103,6 +113,14 @@ impl<R: DataSourceTraits> Reader<R> {
     read_primitive!(read_i64, i64, 8);
     read_primitive!(read_f32, f32, 4);
     read_primitive!(read_f64, f64, 8);
+    read_primitive_be!(read_u16_be, u16, 2);
+    read_primitive_be!(read_i16_be, i16, 2);
+    read_primitive_be!(read_u32_be, u32, 4);
+    read_primitive_be!(read_i32_be, i32, 4);
+    read_primitive_be!(read_u64_be, u64, 8);
+    read_primitive_be!(read_i64_be, i64, 8);
+    read_primitive_be!(read_f32_be, f32, 4);
+    read_primitive_be!(read_f64_be, f64, 8);
 
     pub fn seek(&mut self, seek_from: SeekFrom) -> io::Result<()> {
         self.inner.seek(seek_from)?;

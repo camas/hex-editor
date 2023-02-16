@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::parse::{
-    AttributeValue, BinaryOperator, Expression, Number, ObjectRef, ParsedData, Statement,
-    TypeDeclaration, UnaryOperator,
+    AttributeValue, BasicFunction, BinaryOperator, Expression, FunctionArg, Number, ObjectRef,
+    ParsedData, Statement, TypeDeclaration, UnaryOperator,
 };
 
 #[cfg(test)]
@@ -45,14 +45,14 @@ type TransformResult<T> = Result<T, TransformError>;
 #[derive(Debug)]
 pub struct BtProgram {
     pub functions: Vec<Function>,
-    pub root_function_index: usize,
+    pub root_function_index: FunctionRef,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Function {
-    pub args: Vec<ObjectRef>,
+    pub args: Vec<(ObjectRef, VariableRef)>,
     pub instructions: Vec<Instruction>,
-    pub return_type: Option<ObjectRef>,
+    pub return_type: ObjectRef,
     pub label_offsets: Vec<usize>,
 }
 
@@ -102,9 +102,15 @@ pub enum Instruction {
     Cast(ObjectRef),
     /// Call a function. Args are on stack
     CallFunction {
-        function_ref: ObjectRef,
+        function_ref: FunctionRef,
         arg_count: usize,
     },
+    CallBasicFunction {
+        basic_function: BasicFunction,
+        arg_count: usize,
+    },
+    Return,
+    ReturnVoid,
     /// Gets item from an array
     /// Top of stack is the array, second top the index
     GetArrayIndex,
@@ -161,7 +167,10 @@ pub enum Instruction {
 pub struct VariableRef(u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LabelRef(pub u64);
+pub struct LabelRef(pub(crate) u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FunctionRef(pub(crate) u64);
 
 #[derive(Debug, Clone)]
 pub enum Attribute {
@@ -178,7 +187,7 @@ pub struct TransformMessage {
 struct TransformContext {
     stack: Vec<TransformContextStackItem>,
     variable_ref_count: u64,
-    functions: HashMap<usize, Function>,
+    functions: HashMap<FunctionRef, Function>,
     object_refs: HashMap<String, ObjectRef>,
     queue: VecDeque<TransformItem>,
     messages: Vec<TransformMessage>,
@@ -190,7 +199,7 @@ struct TransformContext {
 struct TransformContextStackItem {
     variables: HashMap<String, VariableRef>,
     label_ref_count: u64,
-    function_index: usize,
+    function_ref: FunctionRef,
 }
 
 #[derive(Debug)]
@@ -235,7 +244,7 @@ impl TransformContext {
 
     fn curr_function_mut(&mut self) -> &mut Function {
         let cur_stack = self.stack.last().unwrap();
-        self.functions.get_mut(&cur_stack.function_index).unwrap()
+        self.functions.get_mut(&cur_stack.function_ref).unwrap()
     }
 
     fn add_instruction(&mut self, instruction: Instruction) {
@@ -244,6 +253,7 @@ impl TransformContext {
 
     fn type_ref(&self, type_declaration: TypeDeclaration) -> TransformResult<ObjectRef> {
         Ok(match type_declaration {
+            TypeDeclaration::Normal(name) if name == "void" => ObjectRef::Void,
             TypeDeclaration::Normal(name) => self.initializable_ref(name)?,
             TypeDeclaration::Array { .. } => todo!(),
             TypeDeclaration::UnsizedArray { .. } => todo!(),
@@ -319,19 +329,45 @@ impl TransformContext {
         result
     }
 
-    fn start_function(&mut self, object_ref: ObjectRef) {
-        let function_index = match object_ref {
-            ObjectRef::Function(i) => i,
+    fn start_function(
+        &mut self,
+        object_ref: ObjectRef,
+        args: Vec<FunctionArg>,
+        return_type: TypeDeclaration,
+    ) -> TransformResult<()> {
+        let function_ref = match object_ref {
+            ObjectRef::Function(i) => FunctionRef(i),
             _ => unreachable!(),
         };
-        if let Some(previous) = self.functions.insert(function_index, Function::default()) {
-            unreachable!("Function already defined");
+
+        let mut variables = HashMap::new();
+        let mut arg_refs = Vec::new();
+        for arg in args {
+            let var_ref = self.create_variable_ref(arg.name.clone())?;
+            variables.insert(arg.name, var_ref);
+            arg_refs.push((self.type_ref(arg.object_type)?, var_ref));
         }
+
+        let return_type = self.type_ref(return_type)?;
+
+        let function = Function {
+            args: arg_refs,
+            instructions: Vec::new(),
+            return_type,
+            label_offsets: Vec::new(),
+        };
+
+        if let Some(previous) = self.functions.insert(function_ref, function) {
+            return Err(TransformError::Generic("function already declared"));
+        }
+
         self.stack.push(TransformContextStackItem {
-            variables: HashMap::new(),
-            function_index,
+            variables,
+            function_ref,
             label_ref_count: 0,
         });
+
+        Ok(())
     }
 
     fn end_function(&mut self) {
@@ -374,7 +410,13 @@ pub fn transform(parsed_data: ParsedData) -> TransformResult<BtProgram> {
     let mut context = TransformContext::new(parsed_data.object_refs);
 
     let root_block_ref = ObjectRef::Function(0);
-    context.start_function(root_block_ref);
+    context
+        .start_function(
+            root_block_ref,
+            Vec::new(),
+            TypeDeclaration::Normal("void".to_string()),
+        )
+        .unwrap();
 
     context.queue.extend(
         parsed_data
@@ -398,11 +440,11 @@ pub fn transform(parsed_data: ParsedData) -> TransformResult<BtProgram> {
     context.end_function();
 
     let functions = (0..parsed_data.function_ref_counter)
-        .map(|i| context.functions.remove(&i).unwrap())
+        .map(|i| context.functions.remove(&FunctionRef(i)).unwrap())
         .collect::<Vec<_>>();
     Ok(BtProgram {
         functions,
-        root_function_index: root_block_ref.index(),
+        root_function_index: FunctionRef(root_block_ref.index()),
     })
 }
 
@@ -511,7 +553,7 @@ fn transform_statement(
                 ));
             }
 
-            let variable_ref = context.create_variable_ref(name.clone())?;
+            let variable_ref = context.create_variable_ref(name)?;
 
             context.queue_instruction(Instruction::PopVariable(variable_ref));
             context.queue_expression(value);
@@ -548,17 +590,7 @@ fn transform_statement(
             args,
             statements,
         } => {
-            // TODO: Don't throw away arg names
-            let arg_refs = args
-                .into_iter()
-                .map(|arg| context.type_ref(arg.object_type))
-                .collect::<Result<_, _>>()?;
-
-            context.start_function(object_ref);
-            if !return_type.is_void() {
-                context.curr_function_mut().return_type = Some(context.type_ref(return_type)?);
-            }
-            context.curr_function_mut().args = arg_refs;
+            context.start_function(object_ref, args, return_type)?;
 
             context.queue_pop_stack();
             statements
@@ -692,8 +724,11 @@ fn transform_statement(
         Statement::Switch { value, switches } => todo!(),
         Statement::Break => todo!(),
         Statement::Continue => todo!(),
-        Statement::Return(_) => todo!(),
-        Statement::ReturnVoid => todo!(),
+        Statement::Return(value) => {
+            context.queue_instruction(Instruction::Return);
+            context.queue_expression(value);
+        }
+        Statement::ReturnVoid => context.queue_instruction(Instruction::ReturnVoid),
     }
 
     Ok(())
@@ -723,50 +758,6 @@ fn transform_attributes(
         attributes.push(Attribute::BackgroundColor(context.next_background_color()));
     }
     attributes
-}
-
-fn __create_declare_instruction(
-    context: &mut TransformContext,
-    name: String,
-    variable_ref: VariableRef,
-    object_type: TypeDeclaration,
-    local: bool,
-    attributes: Vec<Attribute>,
-    arg_count: usize,
-) -> TransformResult<Instruction> {
-    Ok(match object_type {
-        TypeDeclaration::Normal(object_type) => {
-            let object_ref = context.initializable_ref(object_type)?;
-            if local {
-                assert_eq!(arg_count, 0);
-                assert!(attributes.is_empty());
-                Instruction::DeclareObject {
-                    variable_ref,
-                    object_ref,
-                }
-            } else {
-                Instruction::ReadObject {
-                    name,
-                    variable_ref,
-                    object_ref,
-                    arg_count: 0,
-                    attributes,
-                }
-            }
-        }
-        TypeDeclaration::Array {
-            name: object_type,
-            size,
-        } => {
-            let object_ref = context.initializable_ref(object_type)?;
-            if local {
-                todo!()
-            } else {
-                todo!()
-            }
-        }
-        TypeDeclaration::UnsizedArray { .. } => return Err(TransformError::DeclareUnsizedArray),
-    })
 }
 
 fn transform_expression(
@@ -856,10 +847,32 @@ fn transform_expression(
             };
             let function_ref = context.function_ref(function_name)?;
 
-            context.queue_instruction(Instruction::CallFunction {
-                function_ref,
-                arg_count,
-            });
+            let function_instr = match function_ref {
+                ObjectRef::Function(function_ref) => Instruction::CallFunction {
+                    function_ref: FunctionRef(function_ref),
+                    arg_count,
+                },
+                ObjectRef::BasicFunction(basic_function) => {
+                    let expected_arg_count = match basic_function {
+                        BasicFunction::Printf => 0..=usize::MAX,
+                        BasicFunction::Warning => 0..=usize::MAX,
+                        BasicFunction::LittleEndian => 0..=0,
+                        BasicFunction::BigEndian => 0..=0,
+                    };
+                    if !expected_arg_count.contains(&arguments.len()) {
+                        return Err(TransformError::Generic(
+                            "invalid arg count for basic function",
+                        ));
+                    }
+                    Instruction::CallBasicFunction {
+                        basic_function,
+                        arg_count,
+                    }
+                }
+                _ => unreachable!(),
+            };
+
+            context.queue_instruction(function_instr);
             for expression in arguments.into_iter() {
                 context.queue_expression(expression);
             }

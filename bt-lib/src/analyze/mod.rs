@@ -4,8 +4,8 @@ use common::{DataSourceTraits, Reader};
 use log::debug;
 
 use crate::{
-    parse::{BasicObject, FunctionArg, ObjectRef, Statement},
-    transform::{Attribute, BtProgram, Function, Instruction, VariableRef},
+    parse::{BasicFunction, BasicObject, FunctionArg, ObjectRef, Statement},
+    transform::{Attribute, BtProgram, Function, FunctionRef, Instruction, VariableRef},
 };
 
 use self::{
@@ -58,6 +58,7 @@ struct Struct {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Object {
+    Void,
     Number(Number),
     CharArray(Rc<Vec<u8>>),
     U8Array(Rc<Vec<u8>>),
@@ -82,12 +83,14 @@ struct ExecutionContext<'a> {
     reader: Reader<&'a mut Box<dyn DataSourceTraits>>,
     object_stack: Vec<Object>,
     parsed_objects: ParsedObjects,
+    little_endian: bool,
+    stdout: Vec<u8>,
 }
 
 #[derive(Debug)]
 struct FunctionContext {
     variables: HashMap<VariableRef, Object>,
-    function_index: usize,
+    function_ref: FunctionRef,
     instruction_pointer: usize,
 }
 
@@ -109,6 +112,8 @@ pub fn analyze_data(
         reader,
         object_stack: Vec::new(),
         parsed_objects: ParsedObjects::default(),
+        little_endian: true,
+        stdout: Vec::new(),
     };
 
     context.enter_function(program.root_function_index);
@@ -117,21 +122,22 @@ pub fn analyze_data(
     }
 
     assert!(context.function_stack.is_empty());
-    assert!(context.object_stack.is_empty());
+    assert_eq!(context.object_stack, vec![Object::Void]);
 
     Ok(AnalyzedData {
         parsed_objects: context.parsed_objects.objects,
-        stdout: Vec::new(),
+        stdout: context.stdout,
     })
 }
 
 impl<'a> ExecutionContext<'a> {
     fn step(&mut self) -> AnalyzeResult<()> {
-        if self.curr_function_context().instruction_pointer
-            >= self.curr_function().instructions.len()
-        {
-            // TODO: Return values
-            self.function_stack.pop();
+        let function_context = self.curr_function_context();
+        let function = self.curr_function();
+
+        if function_context.instruction_pointer >= function.instructions.len() {
+            self.push(Object::Void);
+            self.exit_function()?;
             return Ok(());
         }
 
@@ -164,8 +170,6 @@ impl<'a> ExecutionContext<'a> {
             }};
         }
 
-        let function_context = self.curr_function_context();
-        let function = self.curr_function();
         let instruction = &function.instructions[function_context.instruction_pointer];
 
         match instruction {
@@ -327,12 +331,92 @@ impl<'a> ExecutionContext<'a> {
             Instruction::Cast(target) => {
                 let target = *target;
                 let value = self.pop();
-                self.push(self.cast(value, target)?);
+                self.push(value.cast(target)?);
             }
             Instruction::CallFunction {
                 function_ref,
                 arg_count,
-            } => todo!(),
+            } => {
+                let function_ref = *function_ref;
+                let arg_count = *arg_count;
+
+                self.curr_function_context_mut().instruction_pointer += 1;
+
+                self.enter_function(function_ref);
+
+                let mut args = (0..arg_count)
+                    .map(|_| self.pop_resolve())
+                    .collect::<Vec<_>>();
+
+                let function = self.curr_function();
+
+                if function.args.len() != arg_count {
+                    return Err(AnalyzeError::GenericError(
+                        "Wrong number of arguments for function",
+                    ));
+                }
+
+                for (arg, arg_ref) in args.iter_mut().zip(function.args.iter()) {
+                    if arg.as_object_ref() != arg_ref.0 {
+                        if matches!(arg, Object::Number(_))
+                            && matches!(arg_ref.0, ObjectRef::Basic(_))
+                        {
+                            // TODO: Probably a better way than this
+                            let mut swap_arg = Object::Void;
+                            std::mem::swap(arg, &mut swap_arg);
+                            *arg = swap_arg.cast(arg_ref.0)?;
+                        } else {
+                            return Err(AnalyzeError::GenericError("Invalid argument type"));
+                        }
+                    }
+                }
+
+                let var_refs = function.args.iter().map(|a| a.1).collect::<Vec<_>>();
+                for (arg, var_ref) in args.into_iter().zip(var_refs.into_iter()) {
+                    self.set_variable(var_ref, arg);
+                }
+
+                return Ok(());
+            }
+            Instruction::CallBasicFunction {
+                basic_function,
+                arg_count,
+            } => {
+                let basic_function = *basic_function;
+
+                let args = (0..*arg_count)
+                    .map(|_| self.pop_resolve())
+                    .collect::<Vec<_>>();
+
+                let mut return_value = Object::Void;
+                match basic_function {
+                    BasicFunction::Printf => {
+                        let result = format_string(args)?;
+                        self.stdout.extend(result.as_bytes());
+                    }
+                    BasicFunction::Warning => {
+                        let result = format_string(args)?;
+                        self.stdout.extend(b"Warning: ");
+                        self.stdout.extend(result.as_bytes());
+                        self.stdout.push(b'\n');
+                    }
+                    BasicFunction::LittleEndian => {
+                        self.little_endian = true;
+                    }
+                    BasicFunction::BigEndian => {
+                        self.little_endian = false;
+                    }
+                }
+
+                self.push(return_value);
+            }
+            Instruction::Return => {
+                self.exit_function()?;
+            }
+            Instruction::ReturnVoid => {
+                self.push(Object::Void);
+                self.exit_function()?;
+            }
             Instruction::GetArrayIndex => todo!(),
             Instruction::GetMember(_) => todo!(),
             Instruction::DeclareArrayValues(_) => todo!(),
@@ -438,20 +522,30 @@ impl<'a> ExecutionContext<'a> {
         !self.function_stack.is_empty()
     }
 
-    fn enter_function(&mut self, function_index: usize) {
+    fn enter_function(&mut self, function_ref: FunctionRef) {
         self.function_stack.push(FunctionContext {
             variables: HashMap::new(),
-            function_index,
+            function_ref,
             instruction_pointer: 0,
         });
     }
 
-    fn exit_function(&mut self) {
+    fn exit_function(&mut self) -> AnalyzeResult<()> {
+        let stack_top = self.object_stack.last().unwrap();
+
+        if self.curr_function().return_type != stack_top.as_object_ref() {
+            return Err(AnalyzeError::GenericError(
+                "Function needs to return a value",
+            ));
+        }
+
         self.function_stack.pop();
+
+        Ok(())
     }
 
     fn curr_function(&self) -> &Function {
-        &self.program.functions[self.function_stack.last().unwrap().function_index]
+        &self.program.functions[self.function_stack.last().unwrap().function_ref.0 as usize]
     }
 
     fn curr_function_context(&self) -> &FunctionContext {
@@ -467,14 +561,46 @@ impl<'a> ExecutionContext<'a> {
             ObjectRef::Basic(basic) => match basic {
                 BasicObject::U8 => Object::new_u8(self.reader.read_u8()?),
                 BasicObject::I8 => Object::new_i8(self.reader.read_i8()?),
-                BasicObject::U16 => Object::new_u16(self.reader.read_u16()?),
-                BasicObject::I16 => Object::new_i16(self.reader.read_i16()?),
-                BasicObject::U32 => Object::new_u32(self.reader.read_u32()?),
-                BasicObject::I32 => Object::new_i32(self.reader.read_i32()?),
-                BasicObject::U64 => Object::new_u64(self.reader.read_u64()?),
-                BasicObject::I64 => Object::new_i64(self.reader.read_i64()?),
-                BasicObject::F32 => Object::new_f32(self.reader.read_f32()?),
-                BasicObject::F64 => Object::new_f64(self.reader.read_f64()?),
+                BasicObject::U16 => Object::new_u16(if self.little_endian {
+                    self.reader.read_u16()?
+                } else {
+                    self.reader.read_u16_be()?
+                }),
+                BasicObject::I16 => Object::new_i16(if self.little_endian {
+                    self.reader.read_i16()?
+                } else {
+                    self.reader.read_i16_be()?
+                }),
+                BasicObject::U32 => Object::new_u32(if self.little_endian {
+                    self.reader.read_u32()?
+                } else {
+                    self.reader.read_u32_be()?
+                }),
+                BasicObject::I32 => Object::new_i32(if self.little_endian {
+                    self.reader.read_i32()?
+                } else {
+                    self.reader.read_i32_be()?
+                }),
+                BasicObject::U64 => Object::new_u64(if self.little_endian {
+                    self.reader.read_u64()?
+                } else {
+                    self.reader.read_u64_be()?
+                }),
+                BasicObject::I64 => Object::new_i64(if self.little_endian {
+                    self.reader.read_i64()?
+                } else {
+                    self.reader.read_i64_be()?
+                }),
+                BasicObject::F32 => Object::new_f32(if self.little_endian {
+                    self.reader.read_f32()?
+                } else {
+                    self.reader.read_f32_be()?
+                }),
+                BasicObject::F64 => Object::new_f64(if self.little_endian {
+                    self.reader.read_f64()?
+                } else {
+                    self.reader.read_f64_be()?
+                }),
                 BasicObject::String => {
                     let mut value = Vec::new();
                     loop {
@@ -492,58 +618,57 @@ impl<'a> ExecutionContext<'a> {
     }
 
     fn read_array(&mut self, object_ref: ObjectRef, size: usize) -> AnalyzeResult<Object> {
+        macro_rules! read_array {
+            ($func:ident) => {
+                (0..size)
+                    .map(|_| self.reader.$func())
+                    .collect::<std::io::Result<Vec<_>>>()?
+            };
+        }
         Ok(match object_ref {
             ObjectRef::Basic(basic) => match basic {
-                BasicObject::U8 => Object::U8Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_u8())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::I8 => Object::I8Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_i8())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::U16 => Object::U16Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_u16())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::I16 => Object::I16Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_i16())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::U32 => Object::U32Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_u32())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::I32 => Object::I32Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_i32())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::U64 => Object::U64Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_u64())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::I64 => Object::I64Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_i64())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::F32 => Object::F32Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_f32())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
-                BasicObject::F64 => Object::F64Array(Rc::new(
-                    (0..size)
-                        .map(|_| self.reader.read_f64())
-                        .collect::<std::io::Result<Vec<_>>>()?,
-                )),
+                BasicObject::U8 => Object::U8Array(Rc::new(read_array!(read_u8))),
+                BasicObject::I8 => Object::I8Array(Rc::new(read_array!(read_i8))),
+                BasicObject::U16 => Object::U16Array(Rc::new(if self.little_endian {
+                    read_array!(read_u16)
+                } else {
+                    read_array!(read_u16_be)
+                })),
+                BasicObject::I16 => Object::I16Array(Rc::new(if self.little_endian {
+                    read_array!(read_i16)
+                } else {
+                    read_array!(read_i16_be)
+                })),
+                BasicObject::U32 => Object::U32Array(Rc::new(if self.little_endian {
+                    read_array!(read_u32)
+                } else {
+                    read_array!(read_u32_be)
+                })),
+                BasicObject::I32 => Object::I32Array(Rc::new(if self.little_endian {
+                    read_array!(read_i32)
+                } else {
+                    read_array!(read_i32_be)
+                })),
+                BasicObject::U64 => Object::U64Array(Rc::new(if self.little_endian {
+                    read_array!(read_u64)
+                } else {
+                    read_array!(read_u64_be)
+                })),
+                BasicObject::I64 => Object::I64Array(Rc::new(if self.little_endian {
+                    read_array!(read_i64)
+                } else {
+                    read_array!(read_i64_be)
+                })),
+                BasicObject::F32 => Object::F32Array(Rc::new(if self.little_endian {
+                    read_array!(read_f32)
+                } else {
+                    read_array!(read_f32_be)
+                })),
+                BasicObject::F64 => Object::F64Array(Rc::new(if self.little_endian {
+                    read_array!(read_f64)
+                } else {
+                    read_array!(read_f64_be)
+                })),
                 BasicObject::String => todo!(),
             },
             _ => todo!(),
@@ -570,29 +695,81 @@ impl<'a> ExecutionContext<'a> {
             o => o,
         }
     }
+}
 
-    fn cast(&self, object: Object, target: ObjectRef) -> AnalyzeResult<Object> {
-        if let Object::Number(object) = object {
-            Ok(match target {
-                ObjectRef::Basic(basic) => Object::Number(match basic {
-                    BasicObject::U8 => Number::U8(Wrapping(object.as_u64() as u8)),
-                    BasicObject::I8 => Number::I8(Wrapping(object.as_u64() as i8)),
-                    BasicObject::U16 => Number::U16(Wrapping(object.as_u64() as u16)),
-                    BasicObject::I16 => Number::I16(Wrapping(object.as_u64() as i16)),
-                    BasicObject::U32 => Number::U32(Wrapping(object.as_u64() as u32)),
-                    BasicObject::I32 => Number::I32(Wrapping(object.as_u64() as i32)),
-                    BasicObject::U64 => Number::U64(Wrapping(object.as_u64())),
-                    BasicObject::I64 => Number::I64(Wrapping(object.as_u64() as i64)),
-                    BasicObject::F32 => Number::F32(object.as_f64() as f32),
-                    BasicObject::F64 => Number::F64(object.as_f64()),
-                    BasicObject::String => return Err(AnalyzeError::InvalidCastTarget(target)),
-                }),
-                _ => return Err(AnalyzeError::InvalidCastTarget(target)),
-            })
+fn format_string(args: Vec<Object>) -> AnalyzeResult<String> {
+    // https://www.sweetscape.com/010editor/manual/FuncInterface.htm#Printf
+
+    if args.is_empty() {
+        return Err(AnalyzeError::GenericError("format has no args"));
+    }
+
+    let mut args = args.into_iter();
+
+    let format = match args.next().unwrap() {
+        Object::CharArray(v) => v,
+        _ => return Err(AnalyzeError::GenericError("format not a string")),
+    };
+
+    macro_rules! next_arg {
+        () => {
+            args.next()
+                .ok_or_else(|| AnalyzeError::GenericError("more args than format specifiers"))?
+        };
+    }
+
+    macro_rules! cast_arg {
+        ($obj_type:ident) => {
+            args.next()
+                .ok_or_else(|| AnalyzeError::GenericError("more args than format specifiers"))?
+                .cast(ObjectRef::Basic(BasicObject::$obj_type))?
+        };
+    }
+
+    let mut result = String::new();
+    let mut escape = false;
+    let mut escape_long = false;
+    let mut escape_double = false;
+    for v in format.iter() {
+        if escape {
+            match *v as char {
+                'd' | 'i' => result += &cast_arg!(I32).as_string(),
+                'u' => result += &cast_arg!(U32).as_string(),
+                'x' => result += &cast_arg!(I32).as_hex_string(),
+                'X' => result += &cast_arg!(I32).as_upper_hex_string(),
+                'o' => result += &cast_arg!(I32).as_octal_string(),
+                'c' => result.push(cast_arg!(U8).get_u8() as char),
+                's' => result += &next_arg!().as_string(),
+                'f' | 'e' | 'g' => result += &cast_arg!(F32).as_string(),
+                'l' => escape_double = true,
+                'L' => escape_long = true,
+                _ => return Err(AnalyzeError::GenericError("invalid escape sequence")),
+            }
+            escape = false;
+        } else if escape_long {
+            match *v as char {
+                'd' => result += &cast_arg!(I64).as_string(),
+                'u' => result += &cast_arg!(U64).as_string(),
+                'x' => result += &cast_arg!(U64).as_hex_string(),
+                'X' => result += &cast_arg!(U64).as_upper_hex_string(),
+                _ => return Err(AnalyzeError::GenericError("invalid escape sequence")),
+            };
+            escape_long = false;
+        } else if escape_double {
+            match *v as char {
+                'd' => result += &cast_arg!(F64).as_string(),
+                _ => return Err(AnalyzeError::GenericError("invalid escape sequence")),
+            }
+            escape_double = false;
         } else {
-            Err(AnalyzeError::InvalidCastTarget(target))
+            match *v as char {
+                '%' => escape = true,
+                c => result.push(c),
+            }
         }
     }
+
+    Ok(result)
 }
 
 macro_rules! unary_number_operation {
@@ -701,7 +878,114 @@ impl Object {
                 Number::F32(_) => BasicObject::F32,
                 Number::F64(_) => BasicObject::F64,
             }),
+            Object::Void => ObjectRef::Void,
             _ => todo!(),
+        }
+    }
+
+    fn cast(self, target: ObjectRef) -> AnalyzeResult<Object> {
+        if let Object::Number(object) = self {
+            Ok(match target {
+                ObjectRef::Basic(basic) => Object::Number(match basic {
+                    BasicObject::U8 => Number::U8(Wrapping(object.as_u64() as u8)),
+                    BasicObject::I8 => Number::I8(Wrapping(object.as_u64() as i8)),
+                    BasicObject::U16 => Number::U16(Wrapping(object.as_u64() as u16)),
+                    BasicObject::I16 => Number::I16(Wrapping(object.as_u64() as i16)),
+                    BasicObject::U32 => Number::U32(Wrapping(object.as_u64() as u32)),
+                    BasicObject::I32 => Number::I32(Wrapping(object.as_u64() as i32)),
+                    BasicObject::U64 => Number::U64(Wrapping(object.as_u64())),
+                    BasicObject::I64 => Number::I64(Wrapping(object.as_u64() as i64)),
+                    BasicObject::F32 => Number::F32(object.as_f64() as f32),
+                    BasicObject::F64 => Number::F64(object.as_f64()),
+                    BasicObject::String => return Err(AnalyzeError::InvalidCastTarget(target)),
+                }),
+                _ => return Err(AnalyzeError::InvalidCastTarget(target)),
+            })
+        } else {
+            Err(AnalyzeError::InvalidCastTarget(target))
+        }
+    }
+
+    fn as_string(&self) -> String {
+        match self {
+            Object::Number(number) => match number {
+                Number::U8(v) => v.0.to_string(),
+                Number::I8(v) => v.0.to_string(),
+                Number::U16(v) => v.0.to_string(),
+                Number::I16(v) => v.0.to_string(),
+                Number::U32(v) => v.0.to_string(),
+                Number::I32(v) => v.0.to_string(),
+                Number::U64(v) => v.0.to_string(),
+                Number::I64(v) => v.0.to_string(),
+                Number::F32(v) => v.to_string(),
+                Number::F64(v) => v.to_string(),
+                _ => todo!(),
+            },
+            _ => todo!(),
+        }
+    }
+
+    fn as_hex_string(&self) -> String {
+        match self {
+            Object::Number(number) => match number {
+                Number::U8(v) => format!("{:x}", v.0),
+                Number::I8(v) => format!("{:x}", v.0),
+                Number::U16(v) => format!("{:x}", v.0),
+                Number::I16(v) => format!("{:x}", v.0),
+                Number::U32(v) => format!("{:x}", v.0),
+                Number::I32(v) => format!("{:x}", v.0),
+                Number::U64(v) => format!("{:x}", v.0),
+                Number::I64(v) => format!("{:x}", v.0),
+                Number::F32(_) => unreachable!(),
+                Number::F64(_) => unreachable!(),
+                _ => todo!(),
+            },
+            _ => todo!(),
+        }
+    }
+
+    fn as_upper_hex_string(&self) -> String {
+        match self {
+            Object::Number(number) => match number {
+                Number::U8(v) => format!("{:X}", v.0),
+                Number::I8(v) => format!("{:X}", v.0),
+                Number::U16(v) => format!("{:X}", v.0),
+                Number::I16(v) => format!("{:X}", v.0),
+                Number::U32(v) => format!("{:X}", v.0),
+                Number::I32(v) => format!("{:X}", v.0),
+                Number::U64(v) => format!("{:X}", v.0),
+                Number::I64(v) => format!("{:X}", v.0),
+                Number::F32(_) => unreachable!(),
+                Number::F64(_) => unreachable!(),
+                _ => todo!(),
+            },
+            _ => todo!(),
+        }
+    }
+
+    fn as_octal_string(&self) -> String {
+        match self {
+            Object::Number(number) => match number {
+                Number::U8(v) => format!("{:o}", v.0),
+                Number::I8(v) => format!("{:o}", v.0),
+                Number::U16(v) => format!("{:o}", v.0),
+                Number::I16(v) => format!("{:o}", v.0),
+                Number::U32(v) => format!("{:o}", v.0),
+                Number::I32(v) => format!("{:o}", v.0),
+                Number::U64(v) => format!("{:o}", v.0),
+                Number::I64(v) => format!("{:o}", v.0),
+                Number::F32(_) => unreachable!(),
+                Number::F64(_) => unreachable!(),
+                _ => todo!(),
+            },
+            _ => todo!(),
+        }
+    }
+
+    fn get_u8(self) -> u8 {
+        match self {
+            Object::Number(Number::U8(v)) => v.0,
+            _ => unreachable!(),
         }
     }
 

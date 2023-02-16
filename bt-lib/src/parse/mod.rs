@@ -303,22 +303,23 @@ lazy_static! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectRef {
+    Void,
     Basic(BasicObject),
     BasicFunction(BasicFunction),
-    Struct(usize),
-    Enum(usize),
-    Union(usize),
-    Function(usize),
+    Struct(u64),
+    Enum(u64),
+    Union(u64),
+    Function(u64),
 }
 
 impl ObjectRef {
-    pub fn index(&self) -> usize {
+    pub fn index(&self) -> u64 {
         match self {
             ObjectRef::Struct(i)
             | ObjectRef::Enum(i)
             | ObjectRef::Union(i)
             | ObjectRef::Function(i) => *i,
-            ObjectRef::Basic(_) | ObjectRef::BasicFunction(_) => unreachable!(),
+            ObjectRef::Void | ObjectRef::Basic(_) | ObjectRef::BasicFunction(_) => unreachable!(),
         }
     }
 }
@@ -341,15 +342,18 @@ pub enum BasicObject {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BasicFunction {
     Printf,
+    Warning,
+    LittleEndian,
+    BigEndian,
 }
 
 #[derive(Debug)]
 struct ParseContext {
     object_refs: HashMap<String, ObjectRef>,
-    struct_ref_counter: usize,
-    enum_ref_counter: usize,
-    union_ref_counter: usize,
-    function_ref_counter: usize,
+    struct_ref_counter: u64,
+    enum_ref_counter: u64,
+    union_ref_counter: u64,
+    function_ref_counter: u64,
 }
 
 impl Default for ParseContext {
@@ -362,6 +366,15 @@ impl Default for ParseContext {
                 for name in $names {
                     object_refs.insert(name.to_string(), object_ref);
                 }
+            };
+        }
+
+        macro_rules! insert_basic_fn {
+            ($fn_name:expr, $fn_type:ident) => {
+                object_refs.insert(
+                    $fn_name.to_string(),
+                    ObjectRef::BasicFunction(BasicFunction::$fn_type),
+                );
             };
         }
 
@@ -397,10 +410,10 @@ impl Default for ParseContext {
         // insert_basic!(&["GUID"]);
         // insert_basic!(&["Opcode"]);
 
-        object_refs.insert(
-            "Printf".to_string(),
-            ObjectRef::BasicFunction(BasicFunction::Printf),
-        );
+        insert_basic_fn!("Printf", Printf);
+        insert_basic_fn!("LittleEndian", LittleEndian);
+        insert_basic_fn!("BigEndian", BigEndian);
+        insert_basic_fn!("Warning", Warning);
 
         Self {
             object_refs,
@@ -465,10 +478,10 @@ impl ParseContext {
 pub struct ParsedData {
     pub statements: Vec<Statement>,
     pub object_refs: HashMap<String, ObjectRef>,
-    pub struct_ref_counter: usize,
-    pub enum_ref_counter: usize,
-    pub union_ref_counter: usize,
-    pub function_ref_counter: usize,
+    pub struct_ref_counter: u64,
+    pub enum_ref_counter: u64,
+    pub union_ref_counter: u64,
+    pub function_ref_counter: u64,
 }
 
 pub fn parse_bt<S: AsRef<str>>(data: S) -> ParseResult<ParsedData> {

@@ -129,7 +129,7 @@ impl RowData {
             analyze::Object::I64Array(v) => (format!("i64[{}]", v.len()), array_value_str(v)),
             analyze::Object::F32Array(v) => (format!("f32[{}]", v.len()), array_value_str(v)),
             analyze::Object::F64Array(v) => (format!("f64[{}]", v.len()), array_value_str(v)),
-            analyze::Object::VariableRef(_) => unreachable!(),
+            analyze::Object::VariableRef(_) | analyze::Object::Void => unreachable!(),
         };
         RowData {
             result_uuid,
