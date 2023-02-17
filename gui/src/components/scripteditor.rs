@@ -23,12 +23,21 @@ pub fn ScriptEditor<G: Html>(cx: Scope) -> View<G> {
                 let editor = CodeEditor::create(element, Some(get_options()));
                 editor.get_model().unwrap().set_value(
                     "// Example script
-                    
-u8 a[53]<color=0x000000>;
-u8 b[6]<color=0xff0000>;
-u8 a[8]<color=0x000000>;
-u8 a[10]<color=0xff0000>;
-u8 a[35]<color=0x000000>;
+
+void background(u64 size) {
+    u8 background[size]<color=0x000000>;
+}
+
+void text(u64 size) {
+    u8 text[size]<color=0xff0000>;
+}
+
+background(53);
+text(6);
+background(8);
+text(10);
+background(35);
+
 ",
                 );
                 editor_signal.set(Some(editor));

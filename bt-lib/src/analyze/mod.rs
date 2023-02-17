@@ -121,7 +121,9 @@ pub fn analyze_data(
         context.step()?;
     }
 
+    // TODO: Throw errors instead. Should probably remove any assert in this file
     assert!(context.function_stack.is_empty());
+    // Script is treated as a function so returns void when exiting
     assert_eq!(context.object_stack, vec![Object::Void]);
 
     Ok(AnalyzedData {
