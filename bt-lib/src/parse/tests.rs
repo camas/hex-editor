@@ -257,6 +257,18 @@ fn parse_expression_binary() {
                 rhs: bident("b"),
             },
         ),
+        (
+            "a < 5 * 6",
+            Expression::Binary {
+                operator: BinaryOperator::LessThan,
+                lhs: bident("a"),
+                rhs: Box::new(Expression::Binary {
+                    operator: BinaryOperator::Multiply,
+                    lhs: Box::new(Expression::Number(Number::I32(5))),
+                    rhs: Box::new(Expression::Number(Number::I32(6))),
+                }),
+            },
+        ),
     ];
     for (input, expected) in test_data {
         test_parse_expression(input, expected)
@@ -453,7 +465,7 @@ fn parse_statement_declare_function() {
         (
             "void a(){}",
             Statement::DeclareFunction {
-                object_ref: ObjectRef::Function(0),
+                object_ref: ObjectRef::Function(1),
                 return_type: TypeDeclaration::Normal("void".to_string()),
                 args: Vec::new(),
                 statements: Vec::new(),
@@ -462,7 +474,7 @@ fn parse_statement_declare_function() {
         (
             "int[10] a(){}",
             Statement::DeclareFunction {
-                object_ref: ObjectRef::Function(0),
+                object_ref: ObjectRef::Function(1),
                 return_type: TypeDeclaration::Array {
                     name: "int".to_string(),
                     size: Expression::Number(Number::I32(10)),
@@ -474,7 +486,7 @@ fn parse_statement_declare_function() {
         (
             "void a(int b, c &d) {}",
             Statement::DeclareFunction {
-                object_ref: ObjectRef::Function(0),
+                object_ref: ObjectRef::Function(1),
                 return_type: TypeDeclaration::Normal("void".to_string()),
                 args: vec![
                     FunctionArg {
@@ -500,7 +512,7 @@ fn parse_statement_declare_function() {
                 "
             .trim(),
             Statement::DeclareFunction {
-                object_ref: ObjectRef::Function(0),
+                object_ref: ObjectRef::Function(1),
                 return_type: TypeDeclaration::Normal("void".to_string()),
                 args: Vec::new(),
                 statements: vec![

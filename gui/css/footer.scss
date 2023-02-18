@@ -1,0 +1,13 @@
+.footer {
+    background-color: #222222;
+    display: grid;
+    grid-template-columns: max-content auto max-content;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+.footer>* {
+    padding-left: 4px;
+    padding-right: 4px;
+    line-height: 24px;
+}

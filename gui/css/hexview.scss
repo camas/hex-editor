@@ -83,13 +83,13 @@
     height: 18px;
 }
 
-.hexview-row-even > .hexview-row-bytes,
-.hexview-row-even > .hexview-row-chars {
+.hexview-row-even>.hexview-row-bytes,
+.hexview-row-even>.hexview-row-chars {
     background-color: #151515;
 }
 
-.hexview-row-odd > .hexview-row-bytes,
-.hexview-row-odd > .hexview-row-chars {
+.hexview-row-odd>.hexview-row-bytes,
+.hexview-row-odd>.hexview-row-chars {
     background-color: #222222;
 }
 
@@ -98,14 +98,13 @@
 }
 
 .hexview-row-header {
-    // width: 100px;
     grid-column: 1;
     text-align: right;
     color: rgb(157, 157, 157);
     margin-right: 10px;
 }
 
-.hexview-row-selected > .hexview-row-header {
+.hexview-row-selected>.hexview-row-header {
     color: #eeeeee;
 }
 
@@ -121,8 +120,8 @@
     display: grid;
 }
 
-.hexview-row-char-container > *,
-.hexview-row-byte-container > * {
+.hexview-row-char-container>*,
+.hexview-row-byte-container>* {
     grid-area: 1 / 1 / -1 / -1;
     pointer-events: none;
 }

@@ -6,7 +6,8 @@ use std::{io::Cursor, num::Wrapping};
 use bt_lib::analyze::AnalyzedData;
 use common::DataSource;
 use components::{
-    hexview::HexView, inspector::Inspector, parsed::ParsedView, scripteditor::ScriptEditor,
+    footer::Footer, hexview::HexView, inspector::Inspector, parsed::ParsedView,
+    scripteditor::ScriptEditor,
 };
 use js_sys::Uint8Array;
 use sycamore::prelude::*;
@@ -19,7 +20,6 @@ use web_sys::ClipboardEvent;
 use web_sys::{DataTransfer, DragEvent, Event};
 
 mod components;
-// mod dataproviders;
 mod lookups;
 
 const BYTES_PER_ROW: u64 = 0x10;
@@ -157,19 +157,17 @@ Open file by:
             HexView{}
             ParsedView{}
             ScriptEditor{}
+            Footer{}
         }
     }
 }
 
 #[cfg(target_family = "wasm")]
 fn on_paste(cx: BoundedScope, event: Event) {
-    #[cfg(target_family = "wasm")]
-    {
-        let event = event.dyn_into::<ClipboardEvent>().unwrap();
-        let Some(clipboard_data) = event.clipboard_data()
-            else { return };
-        use_data_from_data_transfer(cx, clipboard_data);
-    }
+    let event = event.dyn_into::<ClipboardEvent>().unwrap();
+    let Some(clipboard_data) = event.clipboard_data()
+        else { return };
+    use_data_from_data_transfer(cx, clipboard_data);
 }
 
 #[cfg(not(target_family = "wasm"))]

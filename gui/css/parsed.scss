@@ -42,17 +42,17 @@
     height: 20px;
 }
 
-.parsed-row > * {
+.parsed-row>* {
     overflow: hidden;
     border-right: 1px solid #000000;
     border-bottom: 1px solid #000000;
 }
 
-.parsed-row > *:first-child {
+.parsed-row>*:first-child {
     border-left: 1px solid #000000;
 }
 
-.parsed-row-color > * {
+.parsed-row-color>* {
     height: 100%;
     width: 100%;
 }

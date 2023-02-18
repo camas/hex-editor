@@ -707,6 +707,7 @@ fn transform_statement(
             context.queue_instruction(Instruction::Label(loop_end_label_ref));
             context.queue_instruction(Instruction::Jump(loop_start_label_ref));
             if let Some(increment) = increment {
+                context.queue_instruction(Instruction::Pop);
                 context.queue_expression(increment);
             }
             for statement in statements.into_iter().rev() {

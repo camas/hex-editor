@@ -1,5 +1,5 @@
 [package]
-name = "blade-analyzer"
+name = "hex-editor"
 version = "0.1.0"
 edition = "2021"
 

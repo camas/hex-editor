@@ -60,6 +60,27 @@ fn test_while_statement() {
 }
 
 #[test]
+fn for_statement() {
+    let data = vec![1_u8; 10];
+    let program_str = "
+        local u8 a;
+        for (a = 0; a < 3; a++) {
+            u8 b;
+        }
+    ";
+    test_program_output(
+        program_str,
+        data,
+        vec![
+            ("b", Object::new_u8(1)),
+            ("b", Object::new_u8(1)),
+            ("b", Object::new_u8(1)),
+        ],
+        b"",
+    );
+}
+
+#[test]
 fn function() {
     let data = vec![];
     let program_str = r#"

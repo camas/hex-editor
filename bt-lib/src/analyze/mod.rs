@@ -424,11 +424,16 @@ impl<'a> ExecutionContext<'a> {
             Instruction::DeclareArrayValues(_) => todo!(),
             // These change the value of a variable before/after returning a value
             // Can't just pop from stack
-            Instruction::SuffixIncrement => todo!(),
+            Instruction::SuffixIncrement => {
+                let variable_ref = self.pop_ref()?;
+                let value = self.variable(variable_ref).unwrap().clone();
+                self.push(value.clone());
+                let value = value.add(Object::new_u8(1))?;
+                self.set_variable(variable_ref, value);
+            }
             Instruction::SuffixDecrement => todo!(),
             Instruction::PrefixIncrement => todo!(),
             Instruction::PrefixDecrement => todo!(),
-
             Instruction::Positive => {}
             Instruction::Negate => unary_instr!(negate),
             Instruction::UnaryLogicalNot => unary_instr!(logical_not),
@@ -451,10 +456,9 @@ impl<'a> ExecutionContext<'a> {
             Instruction::BitwiseOr => binary_instr!(bitwise_or),
             Instruction::LogicalAnd => binary_instr!(logical_and),
             Instruction::LogicalOr => binary_instr!(logical_or),
-
             Instruction::Assign => {
-                let value = self.pop_resolve();
                 let variable_ref = self.pop_ref()?;
+                let value = self.pop_resolve();
                 self.set_variable(variable_ref, value);
             }
             Instruction::AssignAdd => assign_instr!(add),
