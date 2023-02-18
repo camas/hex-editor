@@ -38,6 +38,10 @@ background(8);
 text(10);
 background(35);
 
+local u64 a;
+for (a = 0; a < 0x10 * 6; a++) {
+    u8 filler; // Color automatically picked if unspecified
+}
 ",
                 );
                 editor_signal.set(Some(editor));
