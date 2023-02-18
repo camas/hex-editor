@@ -1,0 +1,34 @@
+name: Github Pages
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          target: wasm32-unknown-unknown
+
+      - uses: jetli/trunk-action@v0.4.0
+
+      - name: Build
+        run: cargo build --workspace --release --target wasm32-unknown-unknown && cd gui && trunk build --release --public-url '/hex-editor/'
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./gui/dist
