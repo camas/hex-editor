@@ -4,6 +4,8 @@
     grid-template-columns: max-content auto max-content;
     padding-left: 4px;
     padding-right: 4px;
+    // TODO: Feels like a bit of a hack
+    outline: 1px solid #5e5e5e;
 }
 
 .footer>* {

@@ -51,16 +51,11 @@ pub fn ParsedView<G: Html>(cx: Scope) -> View<G> {
                     div(){("Size")}
                     div(){("Color")}
                 }
-                div(
-                    class="parsed-rows",
-                    // on:wheel=handle_wheel,
-                ){
-                    Keyed(
-                        iterable=row_data_signal,
-                        view=|cx, r| parsed_row(cx, r),
-                        key=|x| format!("{}-{}-{}",x.result_uuid, x.start, x.name),
-                    )
-                }
+                Keyed(
+                    iterable=row_data_signal,
+                    view=|cx, r| parsed_row(cx, r),
+                    key=|x| format!("{}-{}-{}",x.result_uuid, x.start, x.name),
+                )
             }
         }
     }
@@ -75,15 +70,13 @@ fn parsed_row<G: Html>(cx: Scope, row_info: RowData) -> View<G> {
         None => "".to_string(),
     };
     view! {cx,
-        div(class="parsed-row") {
-            div(){(name)}
-            div(class="parsed-row-value"){(value)}
-            div(){(type_string)}
-            div(){(format!("{:#x} - {:#x}", row_info.start, row_info.end))}
-            div(){(row_info.size().to_string())}
-            div(class="parsed-row-color") {
-                div(style=bg_color)
-            }
+        div(){(name)}
+        div(class="parsed-row-value"){(value)}
+        div(){(type_string)}
+        div(){(format!("{:#x} - {:#x}", row_info.start, row_info.end))}
+        div(){(row_info.size().to_string())}
+        div(class="parsed-row-color") {
+            div(style=bg_color)
         }
     }
 }
