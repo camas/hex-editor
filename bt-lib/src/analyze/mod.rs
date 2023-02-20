@@ -63,8 +63,8 @@ pub enum Object {
     CharArray(Rc<Vec<u8>>),
     U8Array(Rc<Vec<u8>>),
     I8Array(Rc<Vec<i8>>),
-    I16Array(Rc<Vec<i16>>),
     U16Array(Rc<Vec<u16>>),
+    I16Array(Rc<Vec<i16>>),
     U32Array(Rc<Vec<u32>>),
     I32Array(Rc<Vec<i32>>),
     U64Array(Rc<Vec<u64>>),
@@ -852,6 +852,28 @@ macro_rules! object_num_init {
     };
 }
 
+macro_rules! get_num {
+    ($fn_name:ident, $return_type:ty, $num_type:ident) => {
+        fn $fn_name(&self) -> $return_type {
+            match self {
+                Object::Number(Number::$num_type(v)) => v.0,
+                _ => unreachable!(),
+            }
+        }
+    };
+}
+
+macro_rules! get_numf {
+    ($fn_name:ident, $return_type:ty, $num_type:ident) => {
+        fn $fn_name(&self) -> $return_type {
+            match self {
+                Object::Number(Number::$num_type(v)) => *v,
+                _ => unreachable!(),
+            }
+        }
+    };
+}
+
 impl Object {
     object_num_init!(new_u8, u8, U8);
     object_num_init!(new_i8, i8, I8);
@@ -884,6 +906,16 @@ impl Object {
                 Number::F32(_) => BasicObject::F32,
                 Number::F64(_) => BasicObject::F64,
             }),
+            Object::U8Array(_) => ObjectRef::Array(BasicObject::U8),
+            Object::I8Array(_) => ObjectRef::Array(BasicObject::I8),
+            Object::U16Array(_) => ObjectRef::Array(BasicObject::U16),
+            Object::I16Array(_) => ObjectRef::Array(BasicObject::I16),
+            Object::U32Array(_) => ObjectRef::Array(BasicObject::U32),
+            Object::I32Array(_) => ObjectRef::Array(BasicObject::I32),
+            Object::U64Array(_) => ObjectRef::Array(BasicObject::U64),
+            Object::I64Array(_) => ObjectRef::Array(BasicObject::I64),
+            Object::F32Array(_) => ObjectRef::Array(BasicObject::F32),
+            Object::F64Array(_) => ObjectRef::Array(BasicObject::F64),
             Object::Void => ObjectRef::Void,
             _ => todo!(),
         }
@@ -942,9 +974,8 @@ impl Object {
                 Number::I32(v) => format!("{:x}", v.0),
                 Number::U64(v) => format!("{:x}", v.0),
                 Number::I64(v) => format!("{:x}", v.0),
-                Number::F32(_) => unreachable!(),
-                Number::F64(_) => unreachable!(),
-                _ => todo!(),
+                Number::F32(_) => todo!(),
+                Number::F64(_) => todo!(),
             },
             _ => todo!(),
         }
@@ -961,9 +992,8 @@ impl Object {
                 Number::I32(v) => format!("{:X}", v.0),
                 Number::U64(v) => format!("{:X}", v.0),
                 Number::I64(v) => format!("{:X}", v.0),
-                Number::F32(_) => unreachable!(),
-                Number::F64(_) => unreachable!(),
-                _ => todo!(),
+                Number::F32(_) => todo!(),
+                Number::F64(_) => todo!(),
             },
             _ => todo!(),
         }
@@ -980,20 +1010,23 @@ impl Object {
                 Number::I32(v) => format!("{:o}", v.0),
                 Number::U64(v) => format!("{:o}", v.0),
                 Number::I64(v) => format!("{:o}", v.0),
-                Number::F32(_) => unreachable!(),
-                Number::F64(_) => unreachable!(),
-                _ => todo!(),
+                Number::F32(_) => todo!(),
+                Number::F64(_) => todo!(),
             },
             _ => todo!(),
         }
     }
 
-    fn get_u8(self) -> u8 {
-        match self {
-            Object::Number(Number::U8(v)) => v.0,
-            _ => unreachable!(),
-        }
-    }
+    get_num!(get_u8, u8, U8);
+    get_num!(get_i8, i8, I8);
+    get_num!(get_u16, u16, U16);
+    get_num!(get_i16, i16, I16);
+    get_num!(get_u32, u32, U32);
+    get_num!(get_i32, i32, I32);
+    get_num!(get_u64, u64, U64);
+    get_num!(get_i64, i64, I64);
+    get_numf!(get_f32, f32, F32);
+    get_numf!(get_f64, f64, F64);
 
     fn add(self, other: Object) -> AnalyzeResult<Object> {
         Ok(match (self, other) {

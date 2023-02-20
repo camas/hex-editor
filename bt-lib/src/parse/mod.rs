@@ -301,10 +301,12 @@ lazy_static! {
     };
 }
 
+// TODO: Should be called ObjectType or split. Enum is definitely being abused :(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectRef {
     Void,
     Basic(BasicObject),
+    Array(BasicObject),
     BasicFunction(BasicFunction),
     Struct(u64),
     Enum(u64),
@@ -319,7 +321,10 @@ impl ObjectRef {
             | ObjectRef::Enum(i)
             | ObjectRef::Union(i)
             | ObjectRef::Function(i) => *i,
-            ObjectRef::Void | ObjectRef::Basic(_) | ObjectRef::BasicFunction(_) => unreachable!(),
+            ObjectRef::Void
+            | ObjectRef::Basic(_)
+            | ObjectRef::BasicFunction(_)
+            | ObjectRef::Array(_) => unreachable!(),
         }
     }
 }
