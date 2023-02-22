@@ -1,8 +1,22 @@
+@import 'common';
+
 .hexview {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     overflow-y: hidden;
-    grid-template-columns: min-content repeat(16, 32px) 6px repeat(16, 10px);
     padding: 0px 8px 8px 8px;
+}
+
+.hexview-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: min-content repeat(4, 32px) 1px repeat(4, 32px) 1px repeat(4, 32px) 1px repeat(4, 32px) 6px repeat(16, 10px);
+    grid-auto-rows: 18px;
+    overflow-y: hidden;
+}
+
+.hexview-grid-divider {
+    background-color: #5e5e5e;
 }
 
 .hexview-header {
@@ -10,22 +24,16 @@
     grid-template-columns: subgrid;
 }
 
-.hexview-header-filename-row {
-    display: grid;
-    grid-template-columns: subgrid;
-    grid-column: 1 / -1;
+.hexview-filename {
     text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     height: 20px;
+    width: 100%;
 }
 
-.hexview-header-filename {
-    grid-column: 2 / span 16;
-}
-
-.hexview-header-fileinput {
+.hexview-fileinput {
     display: none;
 }
 
@@ -36,61 +44,34 @@
     height: 20px;
 }
 
-.hexview-header-offsets {
-    grid-column: 2 / span 16;
-    display: grid;
-    grid-template-columns: subgrid;
+.hexview-header-filler {
+    background-color: $theme-shade1;
+    text-align: center;
+    font-size: 10px;
+    padding: 4px;
 }
 
 .hexview-header-offset {
+    background-color: $theme-shade1;
     color: #9d9d9d;
     width: 32px;
     text-align: center;
 }
 
-.hexview-header-offset:nth-child(4n) {
-    border-right: 1px solid #5e5e5e;
-}
-
-.hexview-header-offset:last-child {
-    border-right: 0px;
-}
-
-.hexview-header-text-offsets {
-    grid-column: 19 / span 16;
-    display: grid;
-    grid-template-columns: subgrid;
-}
-
 .hexview-header-textoffset {
+    background-color: $theme-shade1;
     color: #9d9d9d;
     width: 10px;
     text-align: center;
 }
 
 .hexview-rows {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: subgrid;
-    height: 100%;
+    display: contents;
     overflow: hidden;
 }
 
 .hexview-row {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: subgrid;
-    height: 18px;
-}
-
-.hexview-row-even>.hexview-row-bytes,
-.hexview-row-even>.hexview-row-chars {
-    background-color: #151515;
-}
-
-.hexview-row-odd>.hexview-row-bytes,
-.hexview-row-odd>.hexview-row-chars {
-    background-color: #222222;
+    display: contents;
 }
 
 .hexview-row-selected {
@@ -108,21 +89,26 @@
     color: #eeeeee;
 }
 
-.hexview-row-bytes {
-    grid-column: 2 / span 16;
-    display: grid;
-    grid-template-columns: subgrid;
-    cursor: text;
-}
-
 .hexview-row-char-container,
 .hexview-row-byte-container {
     display: grid;
+    cursor: text;
+}
+
+.hexview-row-byte-container-even,
+.hexview-row-char-container-even {
+    background-color: #151515;
+}
+
+.hexview-row-byte-container-odd,
+.hexview-row-char-container-odd {
+    background-color: #222222;
 }
 
 .hexview-row-char-container>*,
 .hexview-row-byte-container>* {
     grid-area: 1 / 1 / -1 / -1;
+    height: 18px; // Firefox like to make it 19px for some reason?
     pointer-events: none;
 }
 
@@ -149,36 +135,6 @@
     color: #888888;
 }
 
-.hexview-row-byte-container:nth-child(4n) {
-    border-right: 1px solid #5e5e5e;
-}
-
-.hexview-row-byte-container:last-child {
-    border-right: 0px;
-}
-
-.hexview-row-chars {
-    grid-column: 19 / span 16;
-    display: grid;
-    grid-template-columns: subgrid;
-    cursor: text;
-}
-
 .hexview-row-char {
     user-select: none;
-    width: 10px;
-    appearance: none;
-}
-
-.hexview-row-byte-input {
-    border: none;
-    display: inherit;
-    font-family: inherit;
-    font-size: inherit;
-    padding: 0;
-    width: 100%;
-    text-align: inherit;
-    background: none;
-    color: inherit;
-    user-select: text;
 }

@@ -144,20 +144,10 @@ fn array_value_str<T>(values: &[T]) -> String
 where
     T: ToString,
 {
-    const TAKE_COUNT: usize = 10;
-    if values.len() < TAKE_COUNT {
-        values
-            .iter()
-            .map(|v| v.to_string())
-            .intersperse(", ".to_string())
-            .collect()
-    } else {
-        values
-            .iter()
-            .take(TAKE_COUNT)
-            .map(|v| v.to_string())
-            .intersperse(", ".to_string())
-            .chain(std::iter::once("...".to_string()))
-            .collect()
-    }
+    values
+        .iter()
+        .take(20)
+        .map(|v| v.to_string())
+        .intersperse(", ".to_string())
+        .collect()
 }

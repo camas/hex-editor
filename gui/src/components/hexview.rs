@@ -18,7 +18,7 @@ pub fn HexView<G: Html>(cx: Scope) -> View<G> {
     view! {cx,
         div(class="hexview") {
             Header{}
-            Rows{}
+            Grid{}
         }
     }
 }
@@ -62,121 +62,18 @@ fn Header<G: Html>(cx: Scope) -> View<G> {
         use_data_from_js_file(cx, file);
     };
 
-    let offsets = View::new_fragment(
-        (0..0x10)
-            .map(|i| {
-                let text = HEX_LOOKUP_LOWER[i];
-                view! {cx, div(class="hexview-header-offset"){(text)}}
-            })
-            .collect(),
-    );
-    let text_offsets = View::new_fragment(
-        "0123456789abcdef"
-            .chars()
-            .map(|i| {
-                view! {cx, div(class="hexview-header-textoffset"){(i)}}
-            })
-            .collect(),
-    );
     view! {cx,
-        div(class="hexview-header-filename-row") {
-            div(
-                class="hexview-header-filename",
-                on:click=filename_click,
-            ) {(name_signal.get())}
+        div(class="hexview-header") {
             input(
                 ref=file_input_ref,
                 type="file",
-                class="hexview-header-fileinput",
+                class="hexview-fileinput",
                 on:change=file_input_changed,
             )
-        }
-        div(class="hexview-header-offsets-container") {
-            div(class="hexview-header-offsets") {(offsets)}
-            div(class="hexview-header-text-offsets") {(text_offsets)}
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-struct RowDisplayInfo {
-    hash: u64,
-    offset: u64,
-    offset_text: String,
-    bytes: Rc<Vec<ByteDisplayInfo>>,
-}
-
-#[derive(Debug, PartialEq)]
-struct ByteDisplayInfo {
-    value: Option<u8>,
-    color: Option<u32>,
-}
-
-impl RowDisplayInfo {
-    fn new(
-        row_offset: u64,
-        data: &[u8],
-        data_full_len: u64,
-        data_offset: u64,
-        invalidate: Invalidate,
-        colors: &[Option<u32>],
-    ) -> Self {
-        // Should have benchmarked but this is probably faster than the `format!(stuff)`
-        // key being used before
-        // Also means we get to use this sick new hashing alg
-        let hash = xxhash_rust::xxh3::xxh3_64(
-            &[invalidate.value().to_le_bytes(), row_offset.to_le_bytes()].concat(),
-        );
-
-        if row_offset >= data_full_len {
-            let bytes = Rc::new(
-                (0..BYTES_PER_ROW)
-                    .map(|_| ByteDisplayInfo {
-                        value: None,
-                        color: None,
-                    })
-                    .collect(),
-            );
-            return RowDisplayInfo {
-                hash,
-                offset: row_offset,
-                offset_text: "".to_string(),
-                bytes,
-            };
-        }
-        let bytes = Rc::new(
-            (row_offset..(row_offset + BYTES_PER_ROW))
-                .map(|byte_offset| {
-                    let (value, color) = if byte_offset >= data_full_len {
-                        (None, &None)
-                    } else {
-                        (
-                            Some(data[(byte_offset - data_offset) as usize]),
-                            &colors[(byte_offset - data_offset) as usize],
-                        )
-                    };
-                    ByteDisplayInfo {
-                        value,
-                        color: *color,
-                    }
-                })
-                .collect(),
-        );
-
-        let offset_text = if row_offset >= data_full_len {
-            "".to_string()
-        } else {
-            // TODO: Lowercase?
-            lexical::to_string_with_options::<_, HEX_FORMAT>(
-                row_offset,
-                &lexical::WriteIntegerOptions::default(),
-            )
-        };
-        RowDisplayInfo {
-            hash,
-            offset: row_offset,
-            offset_text,
-            bytes,
+            div(
+                class="hexview-filename",
+                on:click=filename_click,
+            ) {(name_signal.get())}
         }
     }
 }
@@ -184,7 +81,7 @@ impl RowDisplayInfo {
 struct MouseDown(bool);
 
 #[component]
-fn Rows<G: Html>(cx: Scope) -> View<G> {
+fn Grid<G: Html>(cx: Scope) -> View<G> {
     let data_info_signal = use_context::<Signal<DataInfo>>(cx);
     let invalidate_signal = use_context::<Signal<Invalidate>>(cx);
     let analyzed_data_signal = use_context::<Signal<AnalyzedData>>(cx);
@@ -287,12 +184,44 @@ fn Rows<G: Html>(cx: Scope) -> View<G> {
         e.prevent_default();
     };
 
+    let text_offsets = View::new_fragment(
+        "0123456789abcdef"
+            .chars()
+            .map(|i| {
+                view! {cx, div(class="hexview-header-textoffset"){(i)}}
+            })
+            .collect(),
+    );
+
     view! {cx,
         div(
+            class="hexview-grid",
             ref=rows_ref,
-            class="hexview-rows",
             on:wheel=handle_wheel,
-        ){
+        ) {
+            div(class="hexview-header-filler"){"🤔"}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[0])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[1])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[2])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[3])}
+            div(class="hexview-grid-divider")
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[4])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[5])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[6])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[7])}
+            div(class="hexview-grid-divider")
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[8])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[9])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[10])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[11])}
+            div(class="hexview-grid-divider")
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[12])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[13])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[14])}
+            div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[15])}
+            div()
+            (text_offsets)
+
             Keyed(
                 iterable=row_data_signal,
                 view=|cx, r| hex_row(cx, r), // view=hex_row doesn't work. Lifetimes :)
@@ -314,7 +243,7 @@ fn hex_row<G: Html>(cx: Scope, row_info: Rc<RowDisplayInfo>) -> View<G> {
     });
 
     let even_offset = (row_info_offset / BYTES_PER_ROW) % 2 == 0;
-    let (bytes_hex_view, bytes_str_view) = row_info
+    let (bytes_hex_view_elems, bytes_str_view) = row_info
         .bytes
         .iter()
         .enumerate()
@@ -325,7 +254,15 @@ fn hex_row<G: Html>(cx: Scope, row_info: Rc<RowDisplayInfo>) -> View<G> {
                 str_view(cx, byte_info, offset),
             )
         })
-        .unzip();
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+
+    let mut bytes_hex_view = Vec::new();
+    for (i, v) in bytes_hex_view_elems.into_iter().enumerate() {
+        bytes_hex_view.push(v);
+        if i % 4 == 3 && i < 15 {
+            bytes_hex_view.push(view! {cx, div(class="hexview-grid-divider")});
+        }
+    }
 
     let bytes_hex_view = View::new_fragment(bytes_hex_view);
     let bytes_str_view = View::new_fragment(bytes_str_view);
@@ -349,8 +286,9 @@ fn hex_row<G: Html>(cx: Scope, row_info: Rc<RowDisplayInfo>) -> View<G> {
             on:mousemove=move |e| on_mouse_move(cx, e),
         ) {
             div(class="hexview-row-header") {(row_info.offset_text)}
-            div(class="hexview-row-bytes"){(bytes_hex_view)}
-            div(class="hexview-row-chars"){(bytes_str_view)}
+            (bytes_hex_view)
+            div()
+            (bytes_str_view)
         }
     }
 }
@@ -364,6 +302,13 @@ fn hex_view<G: Html>(cx: BoundedScope, byte_info: &ByteDisplayInfo, offset: u64)
             false
         }
     });
+
+    let even_offset = (offset / BYTES_PER_ROW) % 2 == 0;
+    let container_class = if even_offset {
+        "hexview-row-byte-container hexview-row-byte-container-even"
+    } else {
+        "hexview-row-byte-container hexview-row-byte-container-odd"
+    };
 
     match byte_info.value {
         Some(value) => {
@@ -379,13 +324,13 @@ fn hex_view<G: Html>(cx: BoundedScope, byte_info: &ByteDisplayInfo, offset: u64)
             };
 
             let background_color_class = match byte_info.color {
-                Some(v) => format!("background-color: #{v:06x}bb"),
+                Some(v) => format!("background-color: #{v:06x}bb"), // Force transparency
                 None => "".to_string(),
             };
 
             view! {cx,
                 div(
-                    class="hexview-row-byte-container",
+                    class=container_class,
                     data-index=offset,
                 ) {
                     div(style=background_color_class)
@@ -397,11 +342,7 @@ fn hex_view<G: Html>(cx: BoundedScope, byte_info: &ByteDisplayInfo, offset: u64)
                 }
             }
         }
-        None => {
-            view! {cx,
-                div(class=("hexview-row-byte-container"))
-            }
-        }
+        None => view! {cx, div(class=container_class)},
     }
 }
 
@@ -414,6 +355,13 @@ fn str_view<G: Html>(cx: BoundedScope, byte_info: &ByteDisplayInfo, offset: u64)
             false
         }
     });
+
+    let even_offset = (offset / BYTES_PER_ROW) % 2 == 0;
+    let container_class = if even_offset {
+        "hexview-row-char-container hexview-row-char-container-even"
+    } else {
+        "hexview-row-char-container hexview-row-char-container-odd"
+    };
 
     match byte_info.value {
         Some(value) => {
@@ -435,7 +383,7 @@ fn str_view<G: Html>(cx: BoundedScope, byte_info: &ByteDisplayInfo, offset: u64)
 
             view! {cx,
                 div(
-                    class="hexview-row-char-container",
+                    class=container_class,
                     data-index=offset,
                 ) {
                     div(style=background_color_class)
@@ -445,13 +393,7 @@ fn str_view<G: Html>(cx: BoundedScope, byte_info: &ByteDisplayInfo, offset: u64)
                 }
             }
         }
-        None => {
-            view! {cx,
-                div(
-                    class=("hexview-row-char-container")
-                )
-            }
-        }
+        None => view! {cx, div(class=container_class)},
     }
 }
 
@@ -505,6 +447,89 @@ fn on_mouse_move(cx: BoundedScope, event: Event) {
                 start: s.start,
                 end: index,
             }));
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct RowDisplayInfo {
+    hash: u64,
+    offset: u64,
+    offset_text: String,
+    bytes: Rc<Vec<ByteDisplayInfo>>,
+}
+
+#[derive(Debug, PartialEq)]
+struct ByteDisplayInfo {
+    value: Option<u8>,
+    color: Option<u32>,
+}
+
+impl RowDisplayInfo {
+    fn new(
+        row_offset: u64,
+        data: &[u8],
+        data_full_len: u64,
+        data_offset: u64,
+        invalidate: Invalidate,
+        colors: &[Option<u32>],
+    ) -> Self {
+        // Should have benchmarked but this is probably faster than the `format!(stuff)`
+        // key being used before
+        // Also means we get to use this sick new hashing alg
+        let hash = xxhash_rust::xxh3::xxh3_64(
+            &[invalidate.value().to_le_bytes(), row_offset.to_le_bytes()].concat(),
+        );
+
+        if row_offset >= data_full_len {
+            let bytes = Rc::new(
+                (0..BYTES_PER_ROW)
+                    .map(|_| ByteDisplayInfo {
+                        value: None,
+                        color: None,
+                    })
+                    .collect(),
+            );
+            return RowDisplayInfo {
+                hash,
+                offset: row_offset,
+                offset_text: "".to_string(),
+                bytes,
+            };
+        }
+        let bytes = Rc::new(
+            (row_offset..(row_offset + BYTES_PER_ROW))
+                .map(|byte_offset| {
+                    let (value, color) = if byte_offset >= data_full_len {
+                        (None, &None)
+                    } else {
+                        (
+                            Some(data[(byte_offset - data_offset) as usize]),
+                            &colors[(byte_offset - data_offset) as usize],
+                        )
+                    };
+                    ByteDisplayInfo {
+                        value,
+                        color: *color,
+                    }
+                })
+                .collect(),
+        );
+
+        let offset_text = if row_offset >= data_full_len {
+            "".to_string()
+        } else {
+            // TODO: Lowercase?
+            lexical::to_string_with_options::<_, HEX_FORMAT>(
+                row_offset,
+                &lexical::WriteIntegerOptions::default(),
+            )
+        };
+        RowDisplayInfo {
+            hash,
+            offset: row_offset,
+            offset_text,
+            bytes,
         }
     }
 }

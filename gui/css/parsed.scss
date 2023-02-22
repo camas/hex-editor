@@ -21,7 +21,7 @@
     overflow-x: auto;
     // overflow-y: hidden;
     grid-template-columns: repeat(6, minmax(200px, auto));
-    grid-auto-rows: min-content;
+    grid-auto-rows: 19px;
 }
 
 .parsed-header {
@@ -34,21 +34,22 @@
     background-color: $theme-shade1;
 }
 
-.parsed-grid>*:nth-child(12n+1),
+// One off because the header takes up an element
 .parsed-grid>*:nth-child(12n+2),
 .parsed-grid>*:nth-child(12n+3),
 .parsed-grid>*:nth-child(12n+4),
 .parsed-grid>*:nth-child(12n+5),
-.parsed-grid>*:nth-child(12n+6) {
+.parsed-grid>*:nth-child(12n+6),
+.parsed-grid>*:nth-child(12n+7) {
     background-color: #151515;
 }
 
-.parsed-grid>*:nth-child(12n+7),
 .parsed-grid>*:nth-child(12n+8),
 .parsed-grid>*:nth-child(12n+9),
 .parsed-grid>*:nth-child(12n+10),
 .parsed-grid>*:nth-child(12n+11),
-.parsed-grid>*:nth-child(12n+12) {
+.parsed-grid>*:nth-child(12n+12),
+.parsed-grid>*:nth-child(12n+13) {
     background-color: #222222;
 }
 
@@ -62,5 +63,7 @@
 }
 
 .parsed-row-value {
+    white-space: nowrap;
     text-overflow: ellipsis;
+    overflow: hidden;
 }
