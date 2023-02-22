@@ -183,6 +183,60 @@ pub struct TransformMessage {
     // TODO: Add location info
 }
 
+// TODO: Make this public and an argument to transform
+#[derive(Debug)]
+struct TransformOptions {
+    auto_add_colors: bool,
+}
+
+#[derive(Debug)]
+enum TransformItem {
+    Statement(Box<Statement>),
+    Expression(Box<Expression>),
+    Instruction(Box<Instruction>),
+    PopStack,
+}
+
+pub fn transform(parsed_data: ParsedData) -> TransformResult<BtProgram> {
+    let mut context = TransformContext::new(parsed_data.object_refs);
+
+    let root_block_ref = ObjectRef::Function(0);
+    context
+        .start_function(
+            root_block_ref,
+            Vec::new(),
+            TypeDeclaration::Normal("void".to_string()),
+        )
+        .unwrap();
+
+    context.queue.extend(
+        parsed_data
+            .statements
+            .into_iter()
+            .map(Box::new)
+            .map(TransformItem::Statement),
+    );
+
+    while let Some(item) = context.queue.pop_front() {
+        match item {
+            TransformItem::Instruction(instruction) => context.add_instruction(*instruction),
+            TransformItem::Expression(expression) => context.transform_expression(*expression)?,
+            TransformItem::Statement(statement) => context.transform_statement(*statement)?,
+            TransformItem::PopStack => context.end_function(),
+        }
+    }
+
+    context.end_function();
+
+    let functions = (0..parsed_data.function_ref_counter)
+        .map(|i| context.functions.remove(&FunctionRef(i)).unwrap())
+        .collect::<Vec<_>>();
+    Ok(BtProgram {
+        functions,
+        root_function_index: FunctionRef(root_block_ref.index()),
+    })
+}
+
 #[derive(Debug)]
 struct TransformContext {
     stack: Vec<TransformContextStackItem>,
@@ -200,11 +254,6 @@ struct TransformContextStackItem {
     variables: HashMap<String, VariableRef>,
     label_ref_count: u64,
     function_ref: FunctionRef,
-}
-
-#[derive(Debug)]
-struct TransformOptions {
-    auto_add_colors: bool,
 }
 
 impl TransformContext {
@@ -396,525 +445,472 @@ impl TransformContext {
         self.background_color_index = next_value;
         color
     }
-}
 
-#[derive(Debug)]
-enum TransformItem {
-    Statement(Box<Statement>),
-    Expression(Box<Expression>),
-    Instruction(Box<Instruction>),
-    PopStack,
-}
+    fn transform_statement(&mut self, statement: Statement) -> TransformResult<()> {
+        match statement {
+            Statement::Declare {
+                local,
+                object_type,
+                name,
+                args,
+                attributes,
+            } => {
+                let variable_ref = self.create_variable_ref(name.clone())?;
 
-pub fn transform(parsed_data: ParsedData) -> TransformResult<BtProgram> {
-    let mut context = TransformContext::new(parsed_data.object_refs);
+                if local {
+                    if !attributes.is_empty() {
+                        return Err(TransformError::Generic(
+                            "local variables can't have attributes",
+                        ));
+                    }
 
-    let root_block_ref = ObjectRef::Function(0);
-    context
-        .start_function(
-            root_block_ref,
-            Vec::new(),
-            TypeDeclaration::Normal("void".to_string()),
-        )
-        .unwrap();
+                    match object_type {
+                        TypeDeclaration::Normal(object_type) => {
+                            self.queue_instruction(Instruction::DeclareObject {
+                                variable_ref,
+                                object_ref: self.initializable_ref(object_type)?,
+                            })
+                        }
+                        TypeDeclaration::Array {
+                            name: object_type,
+                            size,
+                        } => {
+                            self.queue_instruction(Instruction::DeclareArray {
+                                variable_ref,
+                                object_ref: self.initializable_ref(object_type)?,
+                            });
+                            self.queue_expression(size);
+                        }
+                        TypeDeclaration::UnsizedArray { .. } => {
+                            return Err(TransformError::DeclareUnsizedArray)
+                        }
+                    }
+                } else {
+                    let arg_count = args.len();
+                    if arg_count != 0 {
+                        todo!("Args not implemented yet");
+                    }
 
-    context.queue.extend(
-        parsed_data
-            .statements
-            .into_iter()
-            .map(Box::new)
-            .map(TransformItem::Statement),
-    );
+                    let attributes = self.transform_attributes(attributes);
 
-    while let Some(item) = context.queue.pop_front() {
-        match item {
-            TransformItem::Instruction(instruction) => context.add_instruction(*instruction),
-            TransformItem::Expression(expression) => {
-                transform_expression(&mut context, *expression)?
+                    // for arg_expression in args {
+                    //     self.queue_expression(arg_expression);
+                    // }
+
+                    match object_type {
+                        TypeDeclaration::Normal(object_type) => {
+                            let object_ref = self.initializable_ref(object_type)?;
+                            self.queue_instruction(Instruction::ReadObject {
+                                name,
+                                variable_ref,
+                                object_ref,
+                                arg_count,
+                                attributes,
+                            });
+                        }
+                        TypeDeclaration::Array {
+                            name: object_type,
+                            size,
+                        } => {
+                            self.queue_instruction(Instruction::ReadArray {
+                                name,
+                                variable_ref,
+                                object_ref: self.initializable_ref(object_type)?,
+                                attributes,
+                            });
+                            self.queue_expression(size);
+                        }
+                        TypeDeclaration::UnsizedArray { .. } => {
+                            return Err(TransformError::DeclareUnsizedArray)
+                        }
+                    }
+                }
             }
-            TransformItem::Statement(statement) => transform_statement(&mut context, *statement)?,
-            TransformItem::PopStack => context.end_function(),
-        }
-    }
+            Statement::DeclareMultiple(statements) => {
+                for statement in statements.into_iter().rev() {
+                    self.queue_statement(statement);
+                }
+            }
+            Statement::DeclareAndAssign {
+                local,
+                object_type,
+                name,
+                attributes,
+                value,
+            } => {
+                if !local {
+                    return Err(TransformError::AssignNonLocalVariable);
+                }
 
-    context.end_function();
-
-    let functions = (0..parsed_data.function_ref_counter)
-        .map(|i| context.functions.remove(&FunctionRef(i)).unwrap())
-        .collect::<Vec<_>>();
-    Ok(BtProgram {
-        functions,
-        root_function_index: FunctionRef(root_block_ref.index()),
-    })
-}
-
-fn transform_statement(
-    context: &mut TransformContext,
-    statement: Statement,
-) -> TransformResult<()> {
-    match statement {
-        Statement::Declare {
-            local,
-            object_type,
-            name,
-            args,
-            attributes,
-        } => {
-            let variable_ref = context.create_variable_ref(name.clone())?;
-
-            if local {
                 if !attributes.is_empty() {
                     return Err(TransformError::Generic(
                         "local variables can't have attributes",
                     ));
                 }
 
+                let variable_ref = self.create_variable_ref(name)?;
+
+                self.queue_instruction(Instruction::PopVariable(variable_ref));
+                self.queue_expression(value);
+
                 match object_type {
                     TypeDeclaration::Normal(object_type) => {
-                        context.queue_instruction(Instruction::DeclareObject {
+                        self.queue_instruction(Instruction::DeclareObject {
                             variable_ref,
-                            object_ref: context.initializable_ref(object_type)?,
+                            object_ref: self.initializable_ref(object_type)?,
                         })
                     }
                     TypeDeclaration::Array {
                         name: object_type,
                         size,
                     } => {
-                        context.queue_instruction(Instruction::DeclareArray {
+                        self.queue_expression(size);
+                        self.queue_instruction(Instruction::DeclareArray {
                             variable_ref,
-                            object_ref: context.initializable_ref(object_type)?,
+                            object_ref: self.initializable_ref(object_type)?,
                         });
-                        context.queue_expression(size);
-                    }
-                    TypeDeclaration::UnsizedArray { .. } => {
-                        return Err(TransformError::DeclareUnsizedArray)
-                    }
-                }
-            } else {
-                let arg_count = args.len();
-                if arg_count != 0 {
-                    todo!("Args not implemented yet");
-                }
-
-                let attributes = transform_attributes(context, attributes);
-
-                // for arg_expression in args {
-                //     context.queue_expression(arg_expression);
-                // }
-
-                match object_type {
-                    TypeDeclaration::Normal(object_type) => {
-                        let object_ref = context.initializable_ref(object_type)?;
-                        context.queue_instruction(Instruction::ReadObject {
-                            name,
-                            variable_ref,
-                            object_ref,
-                            arg_count,
-                            attributes,
-                        });
-                    }
-                    TypeDeclaration::Array {
-                        name: object_type,
-                        size,
-                    } => {
-                        context.queue_instruction(Instruction::ReadArray {
-                            name,
-                            variable_ref,
-                            object_ref: context.initializable_ref(object_type)?,
-                            attributes,
-                        });
-                        context.queue_expression(size);
                     }
                     TypeDeclaration::UnsizedArray { .. } => {
                         return Err(TransformError::DeclareUnsizedArray)
                     }
                 }
             }
-        }
-        Statement::DeclareMultiple(statements) => {
-            for statement in statements.into_iter().rev() {
-                context.queue_statement(statement);
+            Statement::Expression(expression) => {
+                self.queue_instruction(Instruction::Pop);
+                self.queue_expression(expression);
             }
-        }
-        Statement::DeclareAndAssign {
-            local,
-            object_type,
-            name,
-            attributes,
-            value,
-        } => {
-            if !local {
-                return Err(TransformError::AssignNonLocalVariable);
+            Statement::DeclareFunction {
+                object_ref,
+                return_type,
+                args,
+                statements,
+            } => {
+                self.start_function(object_ref, args, return_type)?;
+
+                self.queue_pop_stack();
+                statements
+                    .into_iter()
+                    .rev()
+                    .for_each(|s| self.queue_statement(s));
             }
-
-            if !attributes.is_empty() {
-                return Err(TransformError::Generic(
-                    "local variables can't have attributes",
-                ));
+            Statement::Typedef { original, alias } => {
+                let object_ref = *self
+                    .object_refs
+                    .get(&original)
+                    .ok_or(TransformError::Generic("couldn't find object"))?;
+                self.object_refs.insert(alias, object_ref);
             }
+            Statement::DeclareEnum {
+                object_ref,
+                instance_name,
+                enum_type,
+                variants,
+                attributes,
+            } => todo!(),
+            Statement::DeclareForwardStruct => todo!(),
+            Statement::DeclareStruct {
+                object_ref,
+                instance_name,
+                args,
+                statements,
+                attributes,
+            } => todo!(),
+            Statement::DeclareUnion {
+                object_ref,
+                instance_name,
+                args,
+                statements,
+                attributes,
+            } => todo!(),
+            Statement::If {
+                condition,
+                statements,
+                else_ifs,
+                final_else,
+            } => {
+                let final_label_ref = self.create_label_ref();
+                let mut next_check_label_ref = final_label_ref;
 
-            let variable_ref = context.create_variable_ref(name)?;
+                self.queue_instruction(Instruction::Label(final_label_ref));
 
-            context.queue_instruction(Instruction::PopVariable(variable_ref));
-            context.queue_expression(value);
+                if let Some(statements) = final_else {
+                    next_check_label_ref = self.create_label_ref();
 
-            match object_type {
-                TypeDeclaration::Normal(object_type) => {
-                    context.queue_instruction(Instruction::DeclareObject {
-                        variable_ref,
-                        object_ref: context.initializable_ref(object_type)?,
-                    })
+                    for statement in statements.into_iter().rev() {
+                        self.queue_statement(statement);
+                    }
+                    self.queue_instruction(Instruction::Label(next_check_label_ref));
                 }
-                TypeDeclaration::Array {
-                    name: object_type,
-                    size,
-                } => {
-                    context.queue_expression(size);
-                    context.queue_instruction(Instruction::DeclareArray {
-                        variable_ref,
-                        object_ref: context.initializable_ref(object_type)?,
+
+                for (condition, statements) in else_ifs.into_iter().rev() {
+                    self.queue_instruction(Instruction::Jump(final_label_ref));
+                    for statement in statements.into_iter().rev() {
+                        self.queue_statement(statement);
+                    }
+                    self.queue_instruction(Instruction::JumpFalse(next_check_label_ref));
+                    self.queue_expression(condition);
+
+                    next_check_label_ref = self.create_label_ref();
+                    self.queue_instruction(Instruction::Label(next_check_label_ref));
+                }
+
+                self.queue_instruction(Instruction::Jump(final_label_ref));
+                for statement in statements.into_iter().rev() {
+                    self.queue_statement(statement);
+                }
+                self.queue_instruction(Instruction::JumpFalse(next_check_label_ref));
+                self.queue_expression(condition);
+            }
+            Statement::While {
+                condition,
+                statements,
+            } => {
+                let end_label_ref = self.create_label_ref();
+                let condition_label_ref = self.create_label_ref();
+
+                self.queue_instruction(Instruction::Label(end_label_ref));
+                self.queue_instruction(Instruction::Jump(condition_label_ref));
+                for statement in statements.into_iter().rev() {
+                    self.queue_statement(statement);
+                }
+                self.queue_instruction(Instruction::JumpFalse(end_label_ref));
+                self.queue_expression(condition);
+                self.queue_instruction(Instruction::Label(condition_label_ref));
+            }
+            Statement::DoWhile {
+                condition,
+                statements,
+            } => {
+                let start_label_ref = self.create_label_ref();
+
+                self.queue_instruction(Instruction::JumpTrue(start_label_ref));
+                self.queue_expression(condition);
+                for statement in statements.into_iter().rev() {
+                    self.queue_statement(statement);
+                }
+                self.queue_instruction(Instruction::Label(start_label_ref));
+            }
+            Statement::For {
+                initialization,
+                condition,
+                increment,
+                statements,
+            } => {
+                let loop_start_label_ref = self.create_label_ref();
+                let loop_end_label_ref = self.create_label_ref();
+
+                self.queue_instruction(Instruction::Label(loop_end_label_ref));
+                self.queue_instruction(Instruction::Jump(loop_start_label_ref));
+                if let Some(increment) = increment {
+                    self.queue_instruction(Instruction::Pop);
+                    self.queue_expression(increment);
+                }
+                for statement in statements.into_iter().rev() {
+                    self.queue_statement(statement);
+                }
+                if let Some(condition) = condition {
+                    self.queue_instruction(Instruction::JumpFalse(loop_end_label_ref));
+                    self.queue_expression(condition);
+                }
+                self.queue_instruction(Instruction::Label(loop_start_label_ref));
+                if let Some(initialization) = initialization {
+                    self.queue_expression(initialization);
+                }
+            }
+            Statement::Switch { value, switches } => todo!(),
+            Statement::Break => todo!(),
+            Statement::Continue => todo!(),
+            Statement::Return(value) => {
+                self.queue_instruction(Instruction::Return);
+                self.queue_expression(value);
+            }
+            Statement::ReturnVoid => self.queue_instruction(Instruction::ReturnVoid),
+        }
+
+        Ok(())
+    }
+
+    fn transform_attributes(
+        &mut self,
+        parsed_attributes: Vec<crate::parse::Attribute>,
+    ) -> Vec<Attribute> {
+        let mut attributes = parsed_attributes
+            .into_iter()
+            .flat_map(|a| {
+                let attribute = Attribute::from_parse(&a);
+                if attribute.is_none() {
+                    self.messages.push(TransformMessage {
+                        message: format!("Unknown attribute {}. Ignored", a.name),
                     });
                 }
-                TypeDeclaration::UnsizedArray { .. } => {
-                    return Err(TransformError::DeclareUnsizedArray)
-                }
-            }
+                attribute
+            })
+            .collect::<Vec<_>>();
+        if self.options.auto_add_colors
+            && !attributes
+                .iter()
+                .any(|a| matches!(a, Attribute::BackgroundColor(_)))
+        {
+            attributes.push(Attribute::BackgroundColor(self.next_background_color()));
         }
-        Statement::Expression(expression) => {
-            context.queue_instruction(Instruction::Pop);
-            context.queue_expression(expression);
-        }
-        Statement::DeclareFunction {
-            object_ref,
-            return_type,
-            args,
-            statements,
-        } => {
-            context.start_function(object_ref, args, return_type)?;
-
-            context.queue_pop_stack();
-            statements
-                .into_iter()
-                .rev()
-                .for_each(|s| context.queue_statement(s));
-        }
-        Statement::Typedef { original, alias } => {
-            let object_ref = *context
-                .object_refs
-                .get(&original)
-                .ok_or(TransformError::Generic("couldn't find object"))?;
-            context.object_refs.insert(alias, object_ref);
-        }
-        Statement::DeclareEnum {
-            object_ref,
-            instance_name,
-            enum_type,
-            variants,
-            attributes,
-        } => todo!(),
-        Statement::DeclareForwardStruct => todo!(),
-        Statement::DeclareStruct {
-            object_ref,
-            instance_name,
-            args,
-            statements,
-            attributes,
-        } => todo!(),
-        Statement::DeclareUnion {
-            object_ref,
-            instance_name,
-            args,
-            statements,
-            attributes,
-        } => todo!(),
-        Statement::If {
-            condition,
-            statements,
-            else_ifs,
-            final_else,
-        } => {
-            let final_label_ref = context.create_label_ref();
-            let mut next_check_label_ref = final_label_ref;
-
-            context.queue_instruction(Instruction::Label(final_label_ref));
-
-            if let Some(statements) = final_else {
-                next_check_label_ref = context.create_label_ref();
-
-                for statement in statements.into_iter().rev() {
-                    context.queue_statement(statement);
-                }
-                context.queue_instruction(Instruction::Label(next_check_label_ref));
-            }
-
-            for (condition, statements) in else_ifs.into_iter().rev() {
-                context.queue_instruction(Instruction::Jump(final_label_ref));
-                for statement in statements.into_iter().rev() {
-                    context.queue_statement(statement);
-                }
-                context.queue_instruction(Instruction::JumpFalse(next_check_label_ref));
-                context.queue_expression(condition);
-
-                next_check_label_ref = context.create_label_ref();
-                context.queue_instruction(Instruction::Label(next_check_label_ref));
-            }
-
-            context.queue_instruction(Instruction::Jump(final_label_ref));
-            for statement in statements.into_iter().rev() {
-                context.queue_statement(statement);
-            }
-            context.queue_instruction(Instruction::JumpFalse(next_check_label_ref));
-            context.queue_expression(condition);
-        }
-        Statement::While {
-            condition,
-            statements,
-        } => {
-            let end_label_ref = context.create_label_ref();
-            let condition_label_ref = context.create_label_ref();
-
-            context.queue_instruction(Instruction::Label(end_label_ref));
-            context.queue_instruction(Instruction::Jump(condition_label_ref));
-            for statement in statements.into_iter().rev() {
-                context.queue_statement(statement);
-            }
-            context.queue_instruction(Instruction::JumpFalse(end_label_ref));
-            context.queue_expression(condition);
-            context.queue_instruction(Instruction::Label(condition_label_ref));
-        }
-        Statement::DoWhile {
-            condition,
-            statements,
-        } => {
-            let start_label_ref = context.create_label_ref();
-
-            context.queue_instruction(Instruction::JumpTrue(start_label_ref));
-            context.queue_expression(condition);
-            for statement in statements.into_iter().rev() {
-                context.queue_statement(statement);
-            }
-            context.queue_instruction(Instruction::Label(start_label_ref));
-        }
-        Statement::For {
-            initialization,
-            condition,
-            increment,
-            statements,
-        } => {
-            let loop_start_label_ref = context.create_label_ref();
-            let loop_end_label_ref = context.create_label_ref();
-
-            context.queue_instruction(Instruction::Label(loop_end_label_ref));
-            context.queue_instruction(Instruction::Jump(loop_start_label_ref));
-            if let Some(increment) = increment {
-                context.queue_instruction(Instruction::Pop);
-                context.queue_expression(increment);
-            }
-            for statement in statements.into_iter().rev() {
-                context.queue_statement(statement);
-            }
-            if let Some(condition) = condition {
-                context.queue_instruction(Instruction::JumpFalse(loop_end_label_ref));
-                context.queue_expression(condition);
-            }
-            context.queue_instruction(Instruction::Label(loop_start_label_ref));
-            if let Some(initialization) = initialization {
-                context.queue_expression(initialization);
-            }
-        }
-        Statement::Switch { value, switches } => todo!(),
-        Statement::Break => todo!(),
-        Statement::Continue => todo!(),
-        Statement::Return(value) => {
-            context.queue_instruction(Instruction::Return);
-            context.queue_expression(value);
-        }
-        Statement::ReturnVoid => context.queue_instruction(Instruction::ReturnVoid),
+        attributes
     }
 
-    Ok(())
-}
+    fn transform_expression(
+        self: &mut TransformContext,
+        expression: Expression,
+    ) -> TransformResult<()> {
+        match expression {
+            Expression::Unary(op, target) => {
+                let op_instr = match op {
+                    UnaryOperator::SuffixIncrement => Instruction::SuffixIncrement,
+                    UnaryOperator::SuffixDecrement => Instruction::SuffixDecrement,
+                    UnaryOperator::PrefixIncrement => Instruction::PrefixIncrement,
+                    UnaryOperator::PrefixDecrement => Instruction::PrefixDecrement,
+                    UnaryOperator::Plus => Instruction::Positive, // TODO: Remove
+                    UnaryOperator::Minus => Instruction::Negate,
+                    UnaryOperator::LogicalNot => Instruction::UnaryLogicalNot,
+                    UnaryOperator::BitwiseNot => Instruction::UnaryBitwiseNot,
+                };
 
-fn transform_attributes(
-    context: &mut TransformContext,
-    parsed_attributes: Vec<crate::parse::Attribute>,
-) -> Vec<Attribute> {
-    let mut attributes = parsed_attributes
-        .into_iter()
-        .flat_map(|a| {
-            let attribute = Attribute::from_parse(&a);
-            if attribute.is_none() {
-                context.messages.push(TransformMessage {
-                    message: format!("Unknown attribute {}. Ignored", a.name),
-                });
+                self.queue_instruction(op_instr);
+                self.queue_expression(*target);
             }
-            attribute
-        })
-        .collect::<Vec<_>>();
-    if context.options.auto_add_colors
-        && !attributes
-            .iter()
-            .any(|a| matches!(a, Attribute::BackgroundColor(_)))
-    {
-        attributes.push(Attribute::BackgroundColor(context.next_background_color()));
-    }
-    attributes
-}
+            Expression::Binary { operator, lhs, rhs } => {
+                let op_instr = match operator {
+                    BinaryOperator::Multiply => Instruction::Multiply,
+                    BinaryOperator::Divide => Instruction::Divide,
+                    BinaryOperator::Modulus => Instruction::Modulus,
+                    BinaryOperator::Add => Instruction::Add,
+                    BinaryOperator::Subtract => Instruction::Subtract,
+                    BinaryOperator::LeftShift => Instruction::LeftShift,
+                    BinaryOperator::RightShift => Instruction::RightShift,
+                    BinaryOperator::LessThan => Instruction::LessThan,
+                    BinaryOperator::LessThanOrEqual => Instruction::LessThanOrEqual,
+                    BinaryOperator::MoreThan => Instruction::MoreThan,
+                    BinaryOperator::MoreThanOrEqual => Instruction::MoreThanOrEqual,
+                    BinaryOperator::Equal => Instruction::Equal,
+                    BinaryOperator::NotEqual => Instruction::NotEqual,
+                    BinaryOperator::BitwiseAnd => Instruction::BitwiseAnd,
+                    BinaryOperator::BitwiseXor => Instruction::BitwiseXor,
+                    BinaryOperator::BitwiseOr => Instruction::BitwiseOr,
+                    BinaryOperator::LogicalAnd => Instruction::LogicalAnd,
+                    BinaryOperator::LogicalOr => Instruction::LogicalOr,
+                    BinaryOperator::Assign => Instruction::Assign,
+                    BinaryOperator::AssignAdd => Instruction::AssignAdd,
+                    BinaryOperator::AssignSubtract => Instruction::AssignSubtract,
+                    BinaryOperator::AssignMultiply => Instruction::AssignMultiply,
+                    BinaryOperator::AssignDivide => Instruction::AssignDivide,
+                    BinaryOperator::AssignModulus => Instruction::AssignModulus,
+                    BinaryOperator::AssignLeftShift => Instruction::AssignLeftShift,
+                    BinaryOperator::AssignRightShift => Instruction::AssignRightShift,
+                    BinaryOperator::AssignBitwiseAnd => Instruction::AssignBitwiseAnd,
+                    BinaryOperator::AssignBitwiseXor => Instruction::AssignBitwiseXor,
+                    BinaryOperator::AssignBitwiseOr => Instruction::AssignBitwiseOr,
+                };
 
-fn transform_expression(
-    context: &mut TransformContext,
-    expression: Expression,
-) -> TransformResult<()> {
-    match expression {
-        Expression::Unary(op, target) => {
-            let op_instr = match op {
-                UnaryOperator::SuffixIncrement => Instruction::SuffixIncrement,
-                UnaryOperator::SuffixDecrement => Instruction::SuffixDecrement,
-                UnaryOperator::PrefixIncrement => Instruction::PrefixIncrement,
-                UnaryOperator::PrefixDecrement => Instruction::PrefixDecrement,
-                UnaryOperator::Plus => Instruction::Positive, // TODO: Remove
-                UnaryOperator::Minus => Instruction::Negate,
-                UnaryOperator::LogicalNot => Instruction::UnaryLogicalNot,
-                UnaryOperator::BitwiseNot => Instruction::UnaryBitwiseNot,
-            };
+                self.queue_instruction(op_instr);
+                self.queue_expression(*lhs);
+                self.queue_expression(*rhs);
+            }
+            Expression::Ternary {
+                condition,
+                true_expression,
+                false_expression,
+            } => {
+                let true_ref = self.create_label_ref();
+                let end_ref = self.create_label_ref();
 
-            context.queue_instruction(op_instr);
-            context.queue_expression(*target);
-        }
-        Expression::Binary { operator, lhs, rhs } => {
-            let op_instr = match operator {
-                BinaryOperator::Multiply => Instruction::Multiply,
-                BinaryOperator::Divide => Instruction::Divide,
-                BinaryOperator::Modulus => Instruction::Modulus,
-                BinaryOperator::Add => Instruction::Add,
-                BinaryOperator::Subtract => Instruction::Subtract,
-                BinaryOperator::LeftShift => Instruction::LeftShift,
-                BinaryOperator::RightShift => Instruction::RightShift,
-                BinaryOperator::LessThan => Instruction::LessThan,
-                BinaryOperator::LessThanOrEqual => Instruction::LessThanOrEqual,
-                BinaryOperator::MoreThan => Instruction::MoreThan,
-                BinaryOperator::MoreThanOrEqual => Instruction::MoreThanOrEqual,
-                BinaryOperator::Equal => Instruction::Equal,
-                BinaryOperator::NotEqual => Instruction::NotEqual,
-                BinaryOperator::BitwiseAnd => Instruction::BitwiseAnd,
-                BinaryOperator::BitwiseXor => Instruction::BitwiseXor,
-                BinaryOperator::BitwiseOr => Instruction::BitwiseOr,
-                BinaryOperator::LogicalAnd => Instruction::LogicalAnd,
-                BinaryOperator::LogicalOr => Instruction::LogicalOr,
-                BinaryOperator::Assign => Instruction::Assign,
-                BinaryOperator::AssignAdd => Instruction::AssignAdd,
-                BinaryOperator::AssignSubtract => Instruction::AssignSubtract,
-                BinaryOperator::AssignMultiply => Instruction::AssignMultiply,
-                BinaryOperator::AssignDivide => Instruction::AssignDivide,
-                BinaryOperator::AssignModulus => Instruction::AssignModulus,
-                BinaryOperator::AssignLeftShift => Instruction::AssignLeftShift,
-                BinaryOperator::AssignRightShift => Instruction::AssignRightShift,
-                BinaryOperator::AssignBitwiseAnd => Instruction::AssignBitwiseAnd,
-                BinaryOperator::AssignBitwiseXor => Instruction::AssignBitwiseXor,
-                BinaryOperator::AssignBitwiseOr => Instruction::AssignBitwiseOr,
-            };
+                self.queue_instruction(Instruction::Label(end_ref));
+                self.queue_expression(*true_expression);
+                self.queue_instruction(Instruction::Label(true_ref));
+                self.queue_instruction(Instruction::Jump(end_ref));
+                self.queue_expression(*false_expression);
+                self.queue_instruction(Instruction::JumpTrue(true_ref));
+                self.queue_expression(*condition);
+            }
+            Expression::Cast { target, cast_type } => {
+                let cast_type_ref = self.initializable_ref(cast_type)?;
 
-            context.queue_instruction(op_instr);
-            context.queue_expression(*lhs);
-            context.queue_expression(*rhs);
-        }
-        Expression::Ternary {
-            condition,
-            true_expression,
-            false_expression,
-        } => {
-            let true_ref = context.create_label_ref();
-            let end_ref = context.create_label_ref();
+                self.queue_instruction(Instruction::Cast(cast_type_ref));
+                self.queue_expression(*target);
+            }
+            Expression::CallFunction { target, arguments } => {
+                let arg_count = arguments.len();
+                let function_name = match *target {
+                    Expression::Identifier(name) => name,
+                    _ => unreachable!(),
+                };
+                let function_ref = self.function_ref(function_name)?;
 
-            context.queue_instruction(Instruction::Label(end_ref));
-            context.queue_expression(*true_expression);
-            context.queue_instruction(Instruction::Label(true_ref));
-            context.queue_instruction(Instruction::Jump(end_ref));
-            context.queue_expression(*false_expression);
-            context.queue_instruction(Instruction::JumpTrue(true_ref));
-            context.queue_expression(*condition);
-        }
-        Expression::Cast { target, cast_type } => {
-            let cast_type_ref = context.initializable_ref(cast_type)?;
-
-            context.queue_instruction(Instruction::Cast(cast_type_ref));
-            context.queue_expression(*target);
-        }
-        Expression::CallFunction { target, arguments } => {
-            let arg_count = arguments.len();
-            let function_name = match *target {
-                Expression::Identifier(name) => name,
-                _ => unreachable!(),
-            };
-            let function_ref = context.function_ref(function_name)?;
-
-            let function_instr = match function_ref {
-                ObjectRef::Function(function_ref) => Instruction::CallFunction {
-                    function_ref: FunctionRef(function_ref),
-                    arg_count,
-                },
-                ObjectRef::BasicFunction(basic_function) => {
-                    let expected_arg_count = match basic_function {
-                        BasicFunction::Printf => 0..=usize::MAX,
-                        BasicFunction::Warning => 0..=usize::MAX,
-                        BasicFunction::LittleEndian => 0..=0,
-                        BasicFunction::BigEndian => 0..=0,
-                    };
-                    if !expected_arg_count.contains(&arguments.len()) {
-                        return Err(TransformError::Generic(
-                            "invalid arg count for basic function",
-                        ));
-                    }
-                    Instruction::CallBasicFunction {
-                        basic_function,
+                let function_instr = match function_ref {
+                    ObjectRef::Function(function_ref) => Instruction::CallFunction {
+                        function_ref: FunctionRef(function_ref),
                         arg_count,
+                    },
+                    ObjectRef::BasicFunction(basic_function) => {
+                        let expected_arg_count = match basic_function {
+                            BasicFunction::Printf => 0..=usize::MAX,
+                            BasicFunction::Warning => 0..=usize::MAX,
+                            BasicFunction::LittleEndian => 0..=0,
+                            BasicFunction::BigEndian => 0..=0,
+                        };
+                        if !expected_arg_count.contains(&arguments.len()) {
+                            return Err(TransformError::Generic(
+                                "invalid arg count for basic function",
+                            ));
+                        }
+                        Instruction::CallBasicFunction {
+                            basic_function,
+                            arg_count,
+                        }
                     }
+                    _ => unreachable!(),
+                };
+
+                self.queue_instruction(function_instr);
+                for expression in arguments.into_iter() {
+                    self.queue_expression(expression);
                 }
-                _ => unreachable!(),
-            };
+            }
+            Expression::GetArrayIndex { target, index } => {
+                self.queue_instruction(Instruction::GetArrayIndex);
+                self.queue_expression(*target);
+                self.queue_expression(*index);
+            }
+            Expression::GetMember { target, name } => {
+                self.queue_instruction(Instruction::GetMember(name));
+                self.queue_expression(*target);
+            }
+            Expression::Identifier(name) => {
+                self.add_instruction(Instruction::PushVariable(self.variable_ref(name)?))
+            }
+            Expression::String(value) => self.add_instruction(Instruction::PushString(value)),
+            Expression::WideString(value) => {
+                self.add_instruction(Instruction::PushWideString(value))
+            }
+            Expression::Char(value) => self.add_instruction(Instruction::PushChar(value)),
+            Expression::Number(number) => self.add_instruction(match number {
+                Number::Bool(value) => Instruction::PushBool(value),
+                Number::U32(value) => Instruction::PushU32(value),
+                Number::I32(value) => Instruction::PushI32(value),
+                Number::U64(value) => Instruction::PushU64(value),
+                Number::I64(value) => Instruction::PushI64(value),
+                Number::F32(value) => Instruction::PushF32(value),
+                Number::F64(value) => Instruction::PushF64(value),
+            }),
+            Expression::DeclareArrayValues(array_values) => {
+                let array_value_count = array_values.len();
 
-            context.queue_instruction(function_instr);
-            for expression in arguments.into_iter() {
-                context.queue_expression(expression);
+                self.queue_instruction(Instruction::DeclareArrayValues(array_value_count));
+                for array_value in array_values.into_iter().rev() {
+                    self.queue_expression(array_value);
+                }
             }
         }
-        Expression::GetArrayIndex { target, index } => {
-            context.queue_instruction(Instruction::GetArrayIndex);
-            context.queue_expression(*target);
-            context.queue_expression(*index);
-        }
-        Expression::GetMember { target, name } => {
-            context.queue_instruction(Instruction::GetMember(name));
-            context.queue_expression(*target);
-        }
-        Expression::Identifier(name) => {
-            context.add_instruction(Instruction::PushVariable(context.variable_ref(name)?))
-        }
-        Expression::String(value) => context.add_instruction(Instruction::PushString(value)),
-        Expression::WideString(value) => {
-            context.add_instruction(Instruction::PushWideString(value))
-        }
-        Expression::Char(value) => context.add_instruction(Instruction::PushChar(value)),
-        Expression::Number(number) => context.add_instruction(match number {
-            Number::Bool(value) => Instruction::PushBool(value),
-            Number::U32(value) => Instruction::PushU32(value),
-            Number::I32(value) => Instruction::PushI32(value),
-            Number::U64(value) => Instruction::PushU64(value),
-            Number::I64(value) => Instruction::PushI64(value),
-            Number::F32(value) => Instruction::PushF32(value),
-            Number::F64(value) => Instruction::PushF64(value),
-        }),
-        Expression::DeclareArrayValues(array_values) => {
-            let array_value_count = array_values.len();
 
-            context.queue_instruction(Instruction::DeclareArrayValues(array_value_count));
-            for array_value in array_values.into_iter().rev() {
-                context.queue_expression(array_value);
-            }
-        }
+        Ok(())
     }
-
-    Ok(())
 }
 
 impl Attribute {
