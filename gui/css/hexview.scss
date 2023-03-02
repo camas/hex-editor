@@ -30,6 +30,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     height: 20px;
+    line-height: 20px;
     width: 100%;
 }
 
@@ -56,6 +57,8 @@
     color: #9d9d9d;
     width: 32px;
     text-align: center;
+    height: 18px;
+    line-height: 18px;
 }
 
 .hexview-header-textoffset {
@@ -63,6 +66,8 @@
     color: #9d9d9d;
     width: 10px;
     text-align: center;
+    height: 18px;
+    line-height: 18px;
 }
 
 .hexview-rows {
@@ -83,6 +88,8 @@
     text-align: right;
     color: rgb(157, 157, 157);
     margin-right: 10px;
+    height: 18px;
+    line-height: 18px;
 }
 
 .hexview-row-selected>.hexview-row-header {
@@ -109,7 +116,9 @@
 .hexview-row-byte-container>* {
     grid-area: 1 / 1 / -1 / -1;
     height: 18px; // Firefox like to make it 19px for some reason?
+    line-height: 18px;
     pointer-events: none;
+    vertical-align: middle;
 }
 
 .hexview-row-byte-container {

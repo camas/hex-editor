@@ -1,6 +1,6 @@
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
-use crate::parse::{BasicObject, ObjectRef};
+use crate::object::{NumberArray, NumberType, ObjectType};
 
 use super::Object;
 
@@ -18,7 +18,7 @@ pub struct ParsedObject {
     pub indent: u8,
     pub start: u64,
     pub end: u64,
-    pub background_color: Option<u32>,
+    pub color: Option<u32>,
 }
 
 impl Default for ParsedObjects {
@@ -40,105 +40,78 @@ impl ParsedObjects {
         value: Object,
         start: u64,
         end: u64,
-        background_color: Option<u32>,
+        color: Option<u32>,
     ) {
-        // TODO: This is really ugly. ObjectRef needs a rework
+        // Consolidates sequential basic types into arrays
         if let Some(last) = self.objects.last_mut() {
             if last.name == variable_name && last.end + 1 == start {
-                let last_object_ref = last.value.as_object_ref();
-                if last_object_ref == value.as_object_ref()
-                    && matches!(last_object_ref, ObjectRef::Basic(_))
-                {
-                    let new_object = match last_object_ref {
-                        ObjectRef::Basic(basic) => match basic {
-                            BasicObject::U8 => {
-                                Object::U8Array(Rc::new(vec![last.value.get_u8(), value.get_u8()]))
+                match (last.value.as_type(), value.as_type()) {
+                    (ObjectType::Number(number_type), ObjectType::Number(other))
+                        if number_type == other =>
+                    {
+                        let new_value = Object::Array(match number_type {
+                            NumberType::Char => {
+                                NumberArray::Char(vec![last.value.get_u8(), value.get_u8()])
                             }
-                            BasicObject::I8 => {
-                                Object::I8Array(Rc::new(vec![last.value.get_i8(), value.get_i8()]))
+                            NumberType::U8 => {
+                                NumberArray::U8(vec![last.value.get_u8(), value.get_u8()])
                             }
-                            BasicObject::U16 => Object::U16Array(Rc::new(vec![
-                                last.value.get_u16(),
-                                value.get_u16(),
-                            ])),
-                            BasicObject::I16 => Object::I16Array(Rc::new(vec![
-                                last.value.get_i16(),
-                                value.get_i16(),
-                            ])),
-                            BasicObject::U32 => Object::U32Array(Rc::new(vec![
-                                last.value.get_u32(),
-                                value.get_u32(),
-                            ])),
-                            BasicObject::I32 => Object::I32Array(Rc::new(vec![
-                                last.value.get_i32(),
-                                value.get_i32(),
-                            ])),
-                            BasicObject::U64 => Object::U64Array(Rc::new(vec![
-                                last.value.get_u64(),
-                                value.get_u64(),
-                            ])),
-                            BasicObject::I64 => Object::I64Array(Rc::new(vec![
-                                last.value.get_i64(),
-                                value.get_i64(),
-                            ])),
-                            BasicObject::F32 => Object::F32Array(Rc::new(vec![
-                                last.value.get_f32(),
-                                value.get_f32(),
-                            ])),
-                            BasicObject::F64 => Object::F64Array(Rc::new(vec![
-                                last.value.get_f64(),
-                                value.get_f64(),
-                            ])),
-                            _ => todo!(),
-                        },
-                        _ => unreachable!(),
-                    };
-                    last.value = new_object;
-                    last.end = end;
-                    return;
-                }
-                if let ObjectRef::Array(array_type) = last_object_ref {
-                    if let ObjectRef::Basic(value_basic_type) = value.as_object_ref() {
-                        if array_type == value_basic_type {
-                            // TODO: don't clone an entire vec every time we want to add a value
-                            let new_value = match &last.value {
-                                Object::U8Array(v) => Object::U8Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_u8()]].concat(),
-                                )),
-                                Object::I8Array(v) => Object::I8Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_i8()]].concat(),
-                                )),
-                                Object::U16Array(v) => Object::U16Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_u16()]].concat(),
-                                )),
-                                Object::I16Array(v) => Object::I16Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_i16()]].concat(),
-                                )),
-                                Object::U32Array(v) => Object::U32Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_u32()]].concat(),
-                                )),
-                                Object::I32Array(v) => Object::I32Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_i32()]].concat(),
-                                )),
-                                Object::U64Array(v) => Object::U64Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_u64()]].concat(),
-                                )),
-                                Object::I64Array(v) => Object::I64Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_i64()]].concat(),
-                                )),
-                                Object::F32Array(v) => Object::F32Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_f32()]].concat(),
-                                )),
-                                Object::F64Array(v) => Object::F64Array(Rc::new(
-                                    [(**v).clone(), vec![value.get_f64()]].concat(),
-                                )),
-                                _ => todo!(),
-                            };
-                            last.value = new_value;
-                            last.end = end;
-                            return;
-                        }
+                            NumberType::I8 => {
+                                NumberArray::I8(vec![last.value.get_i8(), value.get_i8()])
+                            }
+                            NumberType::U16 => {
+                                NumberArray::U16(vec![last.value.get_u16(), value.get_u16()])
+                            }
+                            NumberType::I16 => {
+                                NumberArray::I16(vec![last.value.get_i16(), value.get_i16()])
+                            }
+                            NumberType::U32 => {
+                                NumberArray::U32(vec![last.value.get_u32(), value.get_u32()])
+                            }
+                            NumberType::I32 => {
+                                NumberArray::I32(vec![last.value.get_i32(), value.get_i32()])
+                            }
+                            NumberType::U64 => {
+                                NumberArray::U64(vec![last.value.get_u64(), value.get_u64()])
+                            }
+                            NumberType::I64 => {
+                                NumberArray::I64(vec![last.value.get_i64(), value.get_i64()])
+                            }
+                            NumberType::F32 => {
+                                NumberArray::F32(vec![last.value.get_f32(), value.get_f32()])
+                            }
+                            NumberType::F64 => {
+                                NumberArray::F64(vec![last.value.get_f64(), value.get_f64()])
+                            }
+                        });
+                        last.value = new_value;
+                        last.end = end;
+                        return;
                     }
+                    (ObjectType::Array(number_type), ObjectType::Number(other))
+                        if number_type == other =>
+                    {
+                        let last_array = match &mut last.value {
+                            Object::Array(v) => v,
+                            _ => unreachable!(),
+                        };
+                        match last_array {
+                            NumberArray::Char(v) => v.push(value.get_u8()),
+                            NumberArray::U8(v) => v.push(value.get_u8()),
+                            NumberArray::I8(v) => v.push(value.get_i8()),
+                            NumberArray::U16(v) => v.push(value.get_u16()),
+                            NumberArray::I16(v) => v.push(value.get_i16()),
+                            NumberArray::U32(v) => v.push(value.get_u32()),
+                            NumberArray::I32(v) => v.push(value.get_i32()),
+                            NumberArray::U64(v) => v.push(value.get_u64()),
+                            NumberArray::I64(v) => v.push(value.get_i64()),
+                            NumberArray::F32(v) => v.push(value.get_f32()),
+                            NumberArray::F64(v) => v.push(value.get_f64()),
+                        }
+                        last.end = end;
+                        return;
+                    }
+                    _ => {}
                 }
             }
         }
@@ -149,7 +122,7 @@ impl ParsedObjects {
             indent: self.current_indent,
             start,
             end,
-            background_color,
+            color,
         })
     }
 

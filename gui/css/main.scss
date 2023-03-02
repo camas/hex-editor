@@ -4,6 +4,14 @@
 @use "scripteditor";
 @use "footer";
 
+@font-face {
+    font-family: "Droid Sans Mono";
+    src: url("./droid-sans-mono.ttf");
+    font-style: normal;
+    font-weight: 400;
+    font-stretch: 100%;
+}
+
 // Can be useful for debugging
 // * {
 //     outline: 1px solid red;
@@ -30,8 +38,9 @@ a:visited {
     width: 100vw;
     padding: 0px;
     margin: 0px;
-    font-family: "Liberation Mono";
+    font-family: "Droid Sans Mono";
     font-size: 16px;
+    line-height: 1;
     display: grid;
     grid-template-columns: 300px min-content 1fr;
     grid-template-rows: auto 200px 24px;

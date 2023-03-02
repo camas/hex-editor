@@ -95,6 +95,25 @@ fn function() {
 }
 
 #[test]
+fn statements() {
+    let data = vec![0x00, 0x00, 0x00, 0x10, 0x00, 0x12, 0x00, 0x03];
+    let program_str = r#"
+        struct A {
+            u32 b1;
+            u16 b2;
+            u8 b3;
+            u8 b4;
+        };
+
+        A a;
+
+        Printf("%d\n", a.b3);
+    "#;
+
+    test_program_output(program_str, data, Vec::new(), b"");
+}
+
+#[test]
 fn analyze_lenna() {
     let data = std::fs::read("../bt-lib/test-resources/Lenna.png").unwrap();
     let program = std::fs::read_to_string("../bt-lib/test-resources/PNG.bt").unwrap();

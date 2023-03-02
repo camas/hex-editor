@@ -42,6 +42,13 @@ local u64 a;
 for (a = 0; a < 0x10 * 6; a++) {
     u8 filler; // Color automatically picked if unspecified
 }
+
+while (a > 0) {
+    f64 b1;
+    f32 b2;
+    u16 b3;
+    a--;
+}
 ",
                 );
                 editor_signal.set(Some(editor));

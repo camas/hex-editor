@@ -98,7 +98,7 @@ struct RunRequested;
 
 #[component]
 fn App<G: Html>(cx: Scope) -> View<G> {
-    let data = br"               
+    let mut data = br"               
                
                
      Camas'    
@@ -113,6 +113,10 @@ Open file by:
                
 "
     .to_vec();
+
+    for _ in 0..200 {
+        data.extend(b"TESTDATA\x00\x00\x00");
+    }
 
     let provider = DataSource::new(Box::new(Cursor::new(data)));
     let data_info = create_signal(

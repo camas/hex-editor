@@ -1,5 +1,6 @@
 use bt_lib::{
     analyze::{self, AnalyzedData},
+    object::{NumberArray, Object},
     ParsedObject,
 };
 use sycamore::prelude::*;
@@ -95,7 +96,8 @@ struct RowData {
 impl RowData {
     fn from_parsed_object(parsed_object: &ParsedObject, result_uuid: Uuid) -> RowData {
         let (type_string, value) = match &parsed_object.value {
-            analyze::Object::Number(number) => match number {
+            Object::Number(number) => match number {
+                bt_lib::Number::Char(v) => ("char".to_string(), (v.0 as char).to_string()),
                 bt_lib::Number::U8(v) => ("u8".to_string(), v.to_string()),
                 bt_lib::Number::I8(v) => ("i8".to_string(), v.to_string()),
                 bt_lib::Number::U16(v) => ("u16".to_string(), v.to_string()),
@@ -107,22 +109,47 @@ impl RowData {
                 bt_lib::Number::F32(v) => ("f32".to_string(), format!("{:.8}", v)),
                 bt_lib::Number::F64(v) => ("f64".to_string(), format!("{:.8}", v)),
             },
-            analyze::Object::CharArray(v) => (
+            bt_lib::Object::Array(NumberArray::Char(v)) => (
                 format!("char[{}]", v.len()),
                 String::from_utf8_lossy(&v.iter().cloned().take(10).collect::<Vec<_>>())
                     .into_owned(),
             ),
-            analyze::Object::U8Array(v) => (format!("u8[{}]", v.len()), array_value_str(v)),
-            analyze::Object::I8Array(v) => (format!("i8[{}]", v.len()), array_value_str(v)),
-            analyze::Object::U16Array(v) => (format!("u16[{}]", v.len()), array_value_str(v)),
-            analyze::Object::I16Array(v) => (format!("i16[{}]", v.len()), array_value_str(v)),
-            analyze::Object::U32Array(v) => (format!("u32[{}]", v.len()), array_value_str(v)),
-            analyze::Object::I32Array(v) => (format!("i32[{}]", v.len()), array_value_str(v)),
-            analyze::Object::U64Array(v) => (format!("u64[{}]", v.len()), array_value_str(v)),
-            analyze::Object::I64Array(v) => (format!("i64[{}]", v.len()), array_value_str(v)),
-            analyze::Object::F32Array(v) => (format!("f32[{}]", v.len()), array_value_str(v)),
-            analyze::Object::F64Array(v) => (format!("f64[{}]", v.len()), array_value_str(v)),
-            analyze::Object::VariableRef(_) | analyze::Object::Void => unreachable!(),
+            bt_lib::Object::Array(NumberArray::U8(v)) => {
+                (format!("u8[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::I8(v)) => {
+                (format!("i8[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::U16(v)) => {
+                (format!("u16[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::I16(v)) => {
+                (format!("i16[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::U32(v)) => {
+                (format!("u32[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::I32(v)) => {
+                (format!("i32[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::U64(v)) => {
+                (format!("u64[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::I64(v)) => {
+                (format!("i64[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::F32(v)) => {
+                (format!("f32[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::Array(NumberArray::F64(v)) => {
+                (format!("f64[{}]", v.len()), array_value_str(v))
+            }
+            bt_lib::Object::ArrayRef {
+                number_type,
+                start,
+                size,
+            } => todo!(),
+            bt_lib::Object::VariableRef(_) | bt_lib::Object::Void => unreachable!(),
         };
         RowData {
             result_uuid,
@@ -131,7 +158,7 @@ impl RowData {
             name: parsed_object.name.clone(),
             type_string,
             value,
-            bg_color: parsed_object.background_color,
+            bg_color: parsed_object.color,
         }
     }
 

@@ -1,8 +1,14 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::parse::{
-    AttributeValue, BasicFunction, BinaryOperator, Expression, FunctionArg, Number, ObjectRef,
-    ParsedData, Statement, TypeDeclaration, UnaryOperator,
+use crate::{
+    instruction::{
+        Attribute, BasicFunction, FunctionRef, Instruction, LabelRef, StructRef, VariableRef,
+    },
+    object::{NumberType, ObjectType},
+    parse::{
+        AttributeValue, BinaryOperator, CodeBlockArg, Expression, Number, ObjectRef, ParsedData,
+        Statement, TypeDeclaration, UnaryOperator,
+    },
 };
 
 #[cfg(test)]
@@ -21,8 +27,8 @@ pub enum TransformError {
     StructAlreadyDefined(String),
     #[error("Cannot declare an unsized array")]
     DeclareUnsizedArray,
-    #[error("Unknown object type '{0}'")]
-    UnknownObjectType(String),
+    #[error("Unknown object type")]
+    UnknownObjectType,
     #[error("Not an initializable type '{0:?}'")]
     NotAnInitializable(ObjectRef),
     #[error("Not a function '{0:?}'")]
@@ -44,137 +50,23 @@ type TransformResult<T> = Result<T, TransformError>;
 
 #[derive(Debug)]
 pub struct BtProgram {
-    pub functions: Vec<Function>,
-    pub root_function_index: FunctionRef,
+    pub functions: Vec<CodeBlock>,
+    pub structs: Vec<CodeBlock>,
+    pub root_function_ref: FunctionRef,
 }
 
 #[derive(Debug)]
-pub struct Function {
-    pub args: Vec<(ObjectRef, VariableRef)>,
+pub struct CodeBlock {
+    pub args: Vec<(ObjectType, VariableRef)>,
     pub instructions: Vec<Instruction>,
-    pub return_type: ObjectRef,
+    pub return_type: ObjectType,
     pub label_offsets: Vec<usize>,
 }
 
-#[derive(Debug)]
-pub enum Instruction {
-    /// Pop single item from stack
-    Pop,
-    /// Pop to a variable
-    PopVariable(VariableRef),
-    // Push basic objects to stack
-    PushVariable(VariableRef),
-    PushString(Vec<u8>),
-    PushWideString(Vec<u8>),
-    PushBool(bool),
-    PushChar(i8),
-    PushU8(u8),
-    PushU32(u32),
-    PushI32(i32),
-    PushU64(u64),
-    PushI64(i64),
-    PushF32(f32),
-    PushF64(f64),
-    /// Object declaration
-    DeclareObject {
-        variable_ref: VariableRef,
-        object_ref: ObjectRef,
-    },
-    DeclareArray {
-        variable_ref: VariableRef,
-        object_ref: ObjectRef,
-    },
-    /// Object declaration by reading from data
-    ReadObject {
-        name: String,
-        variable_ref: VariableRef,
-        object_ref: ObjectRef,
-        arg_count: usize,
-        attributes: Vec<Attribute>,
-    },
-    ReadArray {
-        name: String,
-        variable_ref: VariableRef,
-        object_ref: ObjectRef,
-        attributes: Vec<Attribute>,
-    },
-    /// Cast top of stack to target object (Replaces)
-    Cast(ObjectRef),
-    /// Call a function. Args are on stack
-    CallFunction {
-        function_ref: FunctionRef,
-        arg_count: usize,
-    },
-    CallBasicFunction {
-        basic_function: BasicFunction,
-        arg_count: usize,
-    },
-    Return,
-    ReturnVoid,
-    /// Gets item from an array
-    /// Top of stack is the array, second top the index
-    GetArrayIndex,
-    /// Gets the member of the item on top of the stack
-    GetMember(String),
-    /// Array declaration values. Top n stack objects are the values
-    DeclareArrayValues(usize),
-    // Unary instructions. Acts on top stack value
-    SuffixIncrement,
-    SuffixDecrement,
-    PrefixIncrement,
-    PrefixDecrement,
-    Positive,
-    Negate,
-    UnaryLogicalNot,
-    UnaryBitwiseNot,
-    // Binary instructions. Acts on top two stack values
-    Multiply,
-    Divide,
-    Modulus,
-    Add,
-    Subtract,
-    LeftShift,
-    RightShift,
-    LessThan,
-    LessThanOrEqual,
-    MoreThan,
-    MoreThanOrEqual,
-    Equal,
-    NotEqual,
-    BitwiseAnd,
-    BitwiseXor,
-    BitwiseOr,
-    LogicalAnd,
-    LogicalOr,
-    Assign,
-    AssignAdd,
-    AssignSubtract,
-    AssignMultiply,
-    AssignDivide,
-    AssignModulus,
-    AssignLeftShift,
-    AssignRightShift,
-    AssignBitwiseAnd,
-    AssignBitwiseXor,
-    AssignBitwiseOr,
-    Label(LabelRef),
-    Jump(LabelRef),
-    JumpTrue(LabelRef),
-    JumpFalse(LabelRef),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VariableRef(u64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LabelRef(pub(crate) u64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FunctionRef(pub(crate) u64);
-
-#[derive(Debug, Clone)]
-pub enum Attribute {
-    BackgroundColor(u32),
+pub enum CodeBlockRef {
+    Function(FunctionRef),
+    Struct(StructRef),
 }
 
 #[derive(Debug)]
@@ -231,9 +123,13 @@ pub fn transform(parsed_data: ParsedData) -> TransformResult<BtProgram> {
     let functions = (0..parsed_data.function_ref_counter)
         .map(|i| context.functions.remove(&FunctionRef(i)).unwrap())
         .collect::<Vec<_>>();
+    let structs = (0..parsed_data.struct_ref_counter)
+        .map(|i| context.structs.remove(&StructRef(i)).unwrap())
+        .collect::<Vec<_>>();
     Ok(BtProgram {
         functions,
-        root_function_index: FunctionRef(root_block_ref.index()),
+        structs,
+        root_function_ref: FunctionRef(root_block_ref.index()),
     })
 }
 
@@ -241,7 +137,8 @@ pub fn transform(parsed_data: ParsedData) -> TransformResult<BtProgram> {
 struct TransformContext {
     stack: Vec<TransformContextStackItem>,
     variable_ref_count: u64,
-    functions: HashMap<FunctionRef, Function>,
+    functions: HashMap<FunctionRef, CodeBlock>,
+    structs: HashMap<StructRef, CodeBlock>,
     object_refs: HashMap<String, ObjectRef>,
     queue: VecDeque<TransformItem>,
     messages: Vec<TransformMessage>,
@@ -253,7 +150,7 @@ struct TransformContext {
 struct TransformContextStackItem {
     variables: HashMap<String, VariableRef>,
     label_ref_count: u64,
-    function_ref: FunctionRef,
+    code_block_ref: CodeBlockRef,
 }
 
 impl TransformContext {
@@ -262,6 +159,7 @@ impl TransformContext {
             stack: Vec::new(),
             variable_ref_count: 0,
             functions: HashMap::new(),
+            structs: HashMap::new(),
             object_refs,
             queue: VecDeque::new(),
             messages: Vec::new(),
@@ -291,39 +189,75 @@ impl TransformContext {
         self.queue.push_front(TransformItem::PopStack);
     }
 
-    fn curr_function_mut(&mut self) -> &mut Function {
+    fn curr_code_block_mut(&mut self) -> &mut CodeBlock {
         let cur_stack = self.stack.last().unwrap();
-        self.functions.get_mut(&cur_stack.function_ref).unwrap()
+        match cur_stack.code_block_ref {
+            CodeBlockRef::Function(function_ref) => self.functions.get_mut(&function_ref).unwrap(),
+            CodeBlockRef::Struct(struct_ref) => self.structs.get_mut(&struct_ref).unwrap(),
+        }
     }
 
     fn add_instruction(&mut self, instruction: Instruction) {
-        self.curr_function_mut().instructions.push(instruction);
+        self.curr_code_block_mut().instructions.push(instruction);
     }
 
-    fn type_ref(&self, type_declaration: TypeDeclaration) -> TransformResult<ObjectRef> {
+    fn type_ref(&self, type_declaration: TypeDeclaration) -> TransformResult<ObjectType> {
         Ok(match type_declaration {
-            TypeDeclaration::Normal(name) if name == "void" => ObjectRef::Void,
-            TypeDeclaration::Normal(name) => self.initializable_ref(name)?,
+            TypeDeclaration::Normal(name) if name == "void" => ObjectType::Void,
+            TypeDeclaration::Normal(name) => self.resolve_object_type(&name)?,
             TypeDeclaration::Array { .. } => todo!(),
             TypeDeclaration::UnsizedArray { .. } => todo!(),
         })
     }
 
-    fn initializable_ref(&self, name: String) -> TransformResult<ObjectRef> {
+    fn resolve_object_type(&self, name: &str) -> TransformResult<ObjectType> {
         let object_ref = self
             .object_refs
-            .get(&name)
+            .get(name)
             .cloned()
-            .ok_or(TransformError::UnknownObjectType(name))?;
+            .ok_or(TransformError::UnknownObjectType)?;
 
-        if !matches!(
-            object_ref,
-            ObjectRef::Basic(_) | ObjectRef::Struct(_) | ObjectRef::Union(_) | ObjectRef::Enum(_)
-        ) {
-            return Err(TransformError::NotAnInitializable(object_ref));
+        Ok(match object_ref {
+            ObjectRef::Void => ObjectType::Void,
+            ObjectRef::Basic(basic) => match basic {
+                crate::parse::BasicObject::U8 => ObjectType::Number(NumberType::U8),
+                crate::parse::BasicObject::I8 => ObjectType::Number(NumberType::I8),
+                crate::parse::BasicObject::U16 => ObjectType::Number(NumberType::U16),
+                crate::parse::BasicObject::I16 => ObjectType::Number(NumberType::I16),
+                crate::parse::BasicObject::U32 => ObjectType::Number(NumberType::U32),
+                crate::parse::BasicObject::I32 => ObjectType::Number(NumberType::I32),
+                crate::parse::BasicObject::U64 => ObjectType::Number(NumberType::U64),
+                crate::parse::BasicObject::I64 => ObjectType::Number(NumberType::I64),
+                crate::parse::BasicObject::F32 => ObjectType::Number(NumberType::F32),
+                crate::parse::BasicObject::F64 => ObjectType::Number(NumberType::F64),
+                crate::parse::BasicObject::String => ObjectType::Array(NumberType::Char),
+            },
+            ObjectRef::Array(basic) => match basic {
+                crate::parse::BasicObject::U8 => ObjectType::Array(NumberType::U8),
+                crate::parse::BasicObject::I8 => ObjectType::Array(NumberType::I8),
+                crate::parse::BasicObject::U16 => ObjectType::Array(NumberType::U16),
+                crate::parse::BasicObject::I16 => ObjectType::Array(NumberType::I16),
+                crate::parse::BasicObject::U32 => ObjectType::Array(NumberType::U32),
+                crate::parse::BasicObject::I32 => ObjectType::Array(NumberType::I32),
+                crate::parse::BasicObject::U64 => ObjectType::Array(NumberType::U64),
+                crate::parse::BasicObject::I64 => ObjectType::Array(NumberType::I64),
+                crate::parse::BasicObject::F32 => ObjectType::Array(NumberType::F32),
+                crate::parse::BasicObject::F64 => ObjectType::Array(NumberType::F64),
+                crate::parse::BasicObject::String => {
+                    return Err(TransformError::Generic(
+                        "multidimensional arrays not supported",
+                    ))
+                }
+            },
+            _ => todo!(),
+        })
+    }
+
+    fn resolve_number_type(&self, name: &str) -> TransformResult<NumberType> {
+        match self.resolve_object_type(name)? {
+            ObjectType::Number(number_type) => Ok(number_type),
+            _ => Err(TransformError::Generic("not a number type")),
         }
-
-        Ok(object_ref)
     }
 
     fn function_ref(&self, name: String) -> TransformResult<ObjectRef> {
@@ -381,11 +315,52 @@ impl TransformContext {
     fn start_function(
         &mut self,
         object_ref: ObjectRef,
-        args: Vec<FunctionArg>,
+        args: Vec<CodeBlockArg>,
         return_type: TypeDeclaration,
     ) -> TransformResult<()> {
         let function_ref = match object_ref {
             ObjectRef::Function(i) => FunctionRef(i),
+            _ => unreachable!(),
+        };
+
+        let mut variables = HashMap::new();
+        let mut arg_types = Vec::new();
+        for arg in args {
+            let var_ref = self.create_variable_ref(arg.name.clone())?;
+            variables.insert(arg.name, var_ref);
+            arg_types.push((self.type_ref(arg.object_type)?, var_ref));
+        }
+
+        let return_type = self.type_ref(return_type)?;
+
+        let function = CodeBlock {
+            args: arg_types,
+            instructions: Vec::new(),
+            return_type,
+            label_offsets: Vec::new(),
+        };
+
+        if let Some(previous) = self.functions.insert(function_ref, function) {
+            return Err(TransformError::Generic("function already declared"));
+        }
+
+        self.stack.push(TransformContextStackItem {
+            variables,
+            code_block_ref: CodeBlockRef::Function(function_ref),
+            label_ref_count: 0,
+        });
+
+        Ok(())
+    }
+
+    fn start_struct(
+        &mut self,
+        object_ref: ObjectRef,
+        args: Vec<CodeBlockArg>,
+        return_type: TypeDeclaration,
+    ) -> TransformResult<()> {
+        let struct_ref = match object_ref {
+            ObjectRef::Struct(i) => StructRef(i),
             _ => unreachable!(),
         };
 
@@ -399,20 +374,20 @@ impl TransformContext {
 
         let return_type = self.type_ref(return_type)?;
 
-        let function = Function {
+        let struct_ = CodeBlock {
             args: arg_refs,
             instructions: Vec::new(),
             return_type,
             label_offsets: Vec::new(),
         };
 
-        if let Some(previous) = self.functions.insert(function_ref, function) {
-            return Err(TransformError::Generic("function already declared"));
+        if let Some(previous) = self.structs.insert(struct_ref, struct_) {
+            return Err(TransformError::Generic("struct already declared"));
         }
 
         self.stack.push(TransformContextStackItem {
             variables,
-            function_ref,
+            code_block_ref: CodeBlockRef::Struct(struct_ref),
             label_ref_count: 0,
         });
 
@@ -421,7 +396,7 @@ impl TransformContext {
 
     fn end_function(&mut self) {
         let label_ref_count = self.stack.last().unwrap().label_ref_count;
-        let function = self.curr_function_mut();
+        let function = self.curr_code_block_mut();
 
         let label_offsets = (0..label_ref_count)
             .map(|i| {
@@ -468,16 +443,16 @@ impl TransformContext {
                         TypeDeclaration::Normal(object_type) => {
                             self.queue_instruction(Instruction::DeclareObject {
                                 variable_ref,
-                                object_ref: self.initializable_ref(object_type)?,
+                                object_type: self.resolve_object_type(&object_type)?,
                             })
                         }
                         TypeDeclaration::Array {
-                            name: object_type,
+                            type_name: object_type,
                             size,
                         } => {
                             self.queue_instruction(Instruction::DeclareArray {
                                 variable_ref,
-                                object_ref: self.initializable_ref(object_type)?,
+                                number_type: self.resolve_number_type(&object_type)?,
                             });
                             self.queue_expression(size);
                         }
@@ -499,23 +474,24 @@ impl TransformContext {
 
                     match object_type {
                         TypeDeclaration::Normal(object_type) => {
-                            let object_ref = self.initializable_ref(object_type)?;
+                            let object_type = self.resolve_object_type(&object_type)?;
                             self.queue_instruction(Instruction::ReadObject {
                                 name,
                                 variable_ref,
-                                object_ref,
+                                object_type,
                                 arg_count,
                                 attributes,
                             });
                         }
                         TypeDeclaration::Array {
-                            name: object_type,
+                            type_name: name,
                             size,
                         } => {
+                            let number_type = self.resolve_number_type(&name)?;
                             self.queue_instruction(Instruction::ReadArray {
                                 name,
                                 variable_ref,
-                                object_ref: self.initializable_ref(object_type)?,
+                                number_type,
                                 attributes,
                             });
                             self.queue_expression(size);
@@ -557,17 +533,17 @@ impl TransformContext {
                     TypeDeclaration::Normal(object_type) => {
                         self.queue_instruction(Instruction::DeclareObject {
                             variable_ref,
-                            object_ref: self.initializable_ref(object_type)?,
+                            object_type: self.resolve_object_type(&object_type)?,
                         })
                     }
                     TypeDeclaration::Array {
-                        name: object_type,
+                        type_name: object_type,
                         size,
                     } => {
                         self.queue_expression(size);
                         self.queue_instruction(Instruction::DeclareArray {
                             variable_ref,
-                            object_ref: self.initializable_ref(object_type)?,
+                            number_type: self.resolve_number_type(&object_type)?,
                         });
                     }
                     TypeDeclaration::UnsizedArray { .. } => {
@@ -607,14 +583,27 @@ impl TransformContext {
                 variants,
                 attributes,
             } => todo!(),
-            Statement::DeclareForwardStruct => todo!(),
+            Statement::DeclareForwardStruct => (),
             Statement::DeclareStruct {
                 object_ref,
                 instance_name,
                 args,
                 statements,
                 attributes,
-            } => todo!(),
+            } => {
+                // TODO: Add default attributes to struct
+
+                let instance_name =
+                    instance_name.unwrap_or(TypeDeclaration::Normal("void".to_string()));
+
+                self.start_struct(object_ref, args, instance_name)?;
+
+                self.queue_pop_stack();
+                statements
+                    .into_iter()
+                    .rev()
+                    .for_each(|s| self.queue_statement(s));
+            }
             Statement::DeclareUnion {
                 object_ref,
                 instance_name,
@@ -747,11 +736,9 @@ impl TransformContext {
             })
             .collect::<Vec<_>>();
         if self.options.auto_add_colors
-            && !attributes
-                .iter()
-                .any(|a| matches!(a, Attribute::BackgroundColor(_)))
+            && !attributes.iter().any(|a| matches!(a, Attribute::Color(_)))
         {
-            attributes.push(Attribute::BackgroundColor(self.next_background_color()));
+            attributes.push(Attribute::Color(self.next_background_color()));
         }
         attributes
     }
@@ -830,9 +817,9 @@ impl TransformContext {
                 self.queue_expression(*condition);
             }
             Expression::Cast { target, cast_type } => {
-                let cast_type_ref = self.initializable_ref(cast_type)?;
+                let cast_type = self.resolve_object_type(&cast_type)?;
 
-                self.queue_instruction(Instruction::Cast(cast_type_ref));
+                self.queue_instruction(Instruction::Cast(cast_type));
                 self.queue_expression(*target);
             }
             Expression::CallFunction { target, arguments } => {
@@ -844,8 +831,8 @@ impl TransformContext {
                 let function_ref = self.function_ref(function_name)?;
 
                 let function_instr = match function_ref {
-                    ObjectRef::Function(function_ref) => Instruction::CallFunction {
-                        function_ref: FunctionRef(function_ref),
+                    ObjectRef::Function(function_ref_index) => Instruction::CallFunction {
+                        function_ref: FunctionRef(function_ref_index),
                         arg_count,
                     },
                     ObjectRef::BasicFunction(basic_function) => {
@@ -916,9 +903,7 @@ impl TransformContext {
 impl Attribute {
     fn from_parse(attribute: &crate::parse::Attribute) -> Option<Attribute> {
         Some(match attribute.name.as_str() {
-            "color" | "bgcolor" => {
-                Attribute::BackgroundColor(get_color_from_attribute(&attribute.value))
-            }
+            "color" | "bgcolor" => Attribute::Color(get_color_from_attribute(&attribute.value)),
             _ => return None,
         })
     }

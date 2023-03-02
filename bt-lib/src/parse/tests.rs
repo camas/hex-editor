@@ -303,7 +303,7 @@ fn parse_statement_declaration() {
             Statement::Declare {
                 local: false,
                 object_type: TypeDeclaration::Array {
-                    name: "int".to_string(),
+                    type_name: "int".to_string(),
                     size: Expression::Number(Number::I32(1)),
                 },
                 name: "a".to_string(),
@@ -316,7 +316,7 @@ fn parse_statement_declaration() {
             Statement::DeclareAndAssign {
                 local: false,
                 object_type: TypeDeclaration::Array {
-                    name: "int".to_string(),
+                    type_name: "int".to_string(),
                     size: ident("b"),
                 },
                 name: "a".to_string(),
@@ -329,7 +329,7 @@ fn parse_statement_declaration() {
             Statement::DeclareAndAssign {
                 local: false,
                 object_type: TypeDeclaration::Array {
-                    name: "int".to_string(),
+                    type_name: "int".to_string(),
                     size: ident("b"),
                 },
                 name: "a".to_string(),
@@ -350,7 +350,7 @@ fn parse_statement_declaration() {
                 Statement::DeclareAndAssign {
                     local: false,
                     object_type: TypeDeclaration::Array {
-                        name: "int".to_string(),
+                        type_name: "int".to_string(),
                         size: Expression::Number(Number::I32(2)),
                     },
                     name: "b".to_string(),
@@ -374,7 +374,7 @@ fn parse_statement_declaration() {
             Statement::Declare {
                 local: false,
                 object_type: TypeDeclaration::Array {
-                    name: "PNG_PALETTE_PIXEL".to_string(),
+                    type_name: "PNG_PALETTE_PIXEL".to_string(),
                     size: Expression::Binary {
                         operator: BinaryOperator::Divide,
                         lhs: Box::new(Expression::Identifier("chunkLen".to_string())),
@@ -442,7 +442,7 @@ fn parse_statement_declare_attributes() {
             Statement::Declare {
                 local: false,
                 object_type: TypeDeclaration::Array {
-                    name: "uint16".to_string(),
+                    type_name: "uint16".to_string(),
                     size: Expression::Number(Number::I32(4)),
                 },
                 name: "btPngSignature".to_string(),
@@ -476,7 +476,7 @@ fn parse_statement_declare_function() {
             Statement::DeclareFunction {
                 object_ref: ObjectRef::Function(1),
                 return_type: TypeDeclaration::Array {
-                    name: "int".to_string(),
+                    type_name: "int".to_string(),
                     size: Expression::Number(Number::I32(10)),
                 },
                 args: Vec::new(),
@@ -489,12 +489,12 @@ fn parse_statement_declare_function() {
                 object_ref: ObjectRef::Function(1),
                 return_type: TypeDeclaration::Normal("void".to_string()),
                 args: vec![
-                    FunctionArg {
+                    CodeBlockArg {
                         object_type: TypeDeclaration::Normal("int".to_string()),
                         name: "b".to_string(),
                         reference: false,
                     },
-                    FunctionArg {
+                    CodeBlockArg {
                         object_type: TypeDeclaration::Normal("c".to_string()),
                         name: "d".to_string(),
                         reference: true,
@@ -612,7 +612,7 @@ fn parse_statement_declare_struct() {
             Statement::DeclareStruct {
                 instance_name: None,
                 object_ref: ObjectRef::Struct(0),
-                args: vec![FunctionArg {
+                args: vec![CodeBlockArg {
                     object_type: TypeDeclaration::Normal("int".to_string()),
                     name: "a".to_string(),
                     reference: true,

@@ -8,12 +8,15 @@ use parse::ParseError;
 use transform::{BtProgram, TransformError};
 
 pub mod analyze;
+mod instruction;
+pub mod object;
 pub mod parse;
 pub mod transform;
 
 pub use analyze::analyze_data;
-pub use analyze::number::Number;
 pub use analyze::parsed::ParsedObject;
+pub use object::number::Number;
+pub use object::Object;
 
 #[derive(thiserror::Error, Debug)]
 pub enum CompileError {

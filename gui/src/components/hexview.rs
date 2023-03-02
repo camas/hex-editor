@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use bt_lib::analyze::AnalyzedData;
+use rand::{seq::SliceRandom, thread_rng};
 use sycamore::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, Event, HtmlElement, HtmlInputElement, WheelEvent};
@@ -139,8 +140,7 @@ fn Grid<G: Html>(cx: Scope) -> View<G> {
             .parsed_objects
             .iter()
             .filter(|o| {
-                o.background_color.is_some()
-                    && !(o.end < data_start_index || o.start > data_end_index)
+                o.color.is_some() && !(o.end < data_start_index || o.start > data_end_index)
             })
             // Last items take precedence
             .rev()
@@ -150,7 +150,7 @@ fn Grid<G: Html>(cx: Scope) -> View<G> {
                 color_objects_in_range
                     .iter()
                     .find(|o| o.start <= i && o.end >= i)
-                    .map(|o| o.background_color.unwrap())
+                    .map(|o| o.color.unwrap())
             })
             .collect::<Vec<_>>();
 
@@ -193,13 +193,17 @@ fn Grid<G: Html>(cx: Scope) -> View<G> {
             .collect(),
     );
 
+    let emoji = ["🤔", "😭", "😂", "🥺", "😇", "💤", "🫃", "☝️"]
+        .choose(&mut thread_rng())
+        .unwrap();
+
     view! {cx,
         div(
             class="hexview-grid",
             ref=rows_ref,
             on:wheel=handle_wheel,
         ) {
-            div(class="hexview-header-filler"){"🤔"}
+            div(class="hexview-header-filler"){(emoji)}
             div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[0])}
             div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[1])}
             div(class="hexview-header-offset"){(HEX_LOOKUP_LOWER[2])}

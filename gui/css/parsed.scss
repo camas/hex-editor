@@ -2,7 +2,7 @@
 
 .parsed {
     display: grid;
-    grid-template-rows: min-content 1fr;
+    grid-template-rows: 20px 1fr;
 }
 
 .parsed-title {
@@ -10,6 +10,8 @@
     display: flex;
     flex-direction: row;
     overflow: hidden;
+    height: 20px;
+    line-height: 20px;
 }
 
 .parsed-title-text {
@@ -21,7 +23,8 @@
     overflow-x: auto;
     // overflow-y: hidden;
     grid-template-columns: repeat(6, minmax(200px, auto));
-    grid-auto-rows: 19px;
+    grid-auto-rows: 20px;
+    line-height: 20px;
 }
 
 .parsed-header {

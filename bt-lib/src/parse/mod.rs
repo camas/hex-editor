@@ -8,10 +8,12 @@ use pest::{
     Parser,
 };
 
+use crate::instruction::BasicFunction;
+
 #[cfg(test)]
 mod tests;
 
-// TODO: Bitfields, Preprocessor, more. Just go through the docs
+// TODO: Bitfields, Preprocessor, more. Just go through the 010 docs
 
 // Here there be dragons
 
@@ -63,7 +65,7 @@ pub enum Statement {
     DeclareFunction {
         object_ref: ObjectRef,
         return_type: TypeDeclaration,
-        args: Vec<FunctionArg>,
+        args: Vec<CodeBlockArg>,
         statements: Vec<Statement>,
     },
     DeclareEnum {
@@ -78,14 +80,14 @@ pub enum Statement {
     DeclareStruct {
         object_ref: ObjectRef,
         instance_name: Option<TypeDeclaration>,
-        args: Vec<FunctionArg>,
+        args: Vec<CodeBlockArg>,
         statements: Vec<Statement>,
         attributes: Vec<Attribute>,
     },
     DeclareUnion {
         object_ref: ObjectRef,
         instance_name: Option<TypeDeclaration>,
-        args: Vec<FunctionArg>,
+        args: Vec<CodeBlockArg>,
         statements: Vec<Statement>,
         attributes: Vec<Attribute>,
     },
@@ -141,7 +143,7 @@ pub enum AttributeValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionArg {
+pub struct CodeBlockArg {
     pub object_type: TypeDeclaration,
     pub name: String,
     pub reference: bool,
@@ -150,7 +152,7 @@ pub struct FunctionArg {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeDeclaration {
     Normal(String),
-    Array { name: String, size: Expression },
+    Array { type_name: String, size: Expression },
     UnsizedArray { name: String },
 }
 
@@ -342,14 +344,6 @@ pub enum BasicObject {
     F32,
     F64,
     String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BasicFunction {
-    Printf,
-    Warning,
-    LittleEndian,
-    BigEndian,
 }
 
 #[derive(Debug)]
@@ -566,7 +560,7 @@ fn parse_union(context: &mut ParseContext, pair: Pair<Rule>) -> Statement {
                     false
                 };
                 let name = next.as_str().to_string();
-                FunctionArg {
+                CodeBlockArg {
                     object_type,
                     name,
                     reference,
@@ -824,10 +818,13 @@ fn parse_declare(pair: Pair<Rule>) -> Statement {
             let partial_type = partial_type.clone();
             let (name, object_type) = match partial_name {
                 TypeDeclaration::Normal(name) => (name, TypeDeclaration::Normal(partial_type)),
-                TypeDeclaration::Array { name, size } => (
+                TypeDeclaration::Array {
+                    type_name: name,
+                    size,
+                } => (
                     name,
                     TypeDeclaration::Array {
-                        name: partial_type,
+                        type_name: partial_type,
                         size,
                     },
                 ),
@@ -903,7 +900,7 @@ fn parse_declare_function(context: &mut ParseContext, pair: Pair<Rule>) -> State
                 false
             };
             let name = next.as_str().to_string();
-            FunctionArg {
+            CodeBlockArg {
                 object_type,
                 name,
                 reference,
@@ -1024,7 +1021,7 @@ fn parse_declare_struct(context: &mut ParseContext, pair: Pair<Rule>) -> Stateme
                     false
                 };
                 let name = next.as_str().to_string();
-                FunctionArg {
+                CodeBlockArg {
                     object_type,
                     name,
                     reference,
@@ -1092,7 +1089,10 @@ fn parse_type_declaration(pair: Pair<Rule>) -> TypeDeclaration {
             let mut pairs = pair.into_inner();
             let name = pairs.next().unwrap().as_str().to_string();
             let size = parse_expression(pairs.next().unwrap().into_inner());
-            TypeDeclaration::Array { name, size }
+            TypeDeclaration::Array {
+                type_name: name,
+                size,
+            }
         }
         Rule::UnsizedArrayIdentifier => {
             let name = pair.into_inner().next().unwrap().as_str().to_string();
@@ -1359,7 +1359,9 @@ impl TypeDeclaration {
     pub fn name(&self) -> &str {
         match self {
             Self::Normal(name) => name,
-            Self::Array { name, .. } => name,
+            Self::Array {
+                type_name: name, ..
+            } => name,
             Self::UnsizedArray { name } => name,
         }
     }

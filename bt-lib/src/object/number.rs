@@ -1,10 +1,11 @@
 use std::num::Wrapping;
 
-use super::{AnalyzeError, AnalyzeResult};
+use super::{NumberType, ObjectError, ObjectResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Number {
     // All integers are Wrapping to mimic C
+    Char(Wrapping<u8>),
     U8(Wrapping<u8>),
     I8(Wrapping<i8>),
     U16(Wrapping<u16>),
@@ -19,8 +20,9 @@ pub enum Number {
 
 macro_rules! unary_operation {
     ($func_name:ident, $operation:expr) => {
-        pub fn $func_name(self) -> Number {
+        pub(crate) fn $func_name(self) -> Number {
             match self {
+                Number::Char(v) => Number::Char($operation(v)),
                 Number::U8(v) => Number::U8($operation(v)),
                 Number::I8(v) => Number::I8($operation(v)),
                 Number::U16(v) => Number::U16($operation(v)),
@@ -38,7 +40,7 @@ macro_rules! unary_operation {
 
 macro_rules! binary_operation {
     ($func_name:ident, $operation:tt) => {
-        pub fn $func_name(self, other: Number) -> Number {
+        pub(crate)  fn $func_name(self, other: Number) -> Number {
             // For integers use the highest bit count, preferring unsigned values
             // When adding float to int prefer float
             match (self, other) {
@@ -63,7 +65,10 @@ macro_rules! binary_operation {
                 (Number::U8(a), b) | (b, Number::U8(a)) => {
                     Number::U8(a $operation Wrapping(b.as_u64() as u8))
                 }
-                (Number::I8(a), Number::I8(b)) => { Number::I8(a $operation b) }
+                (Number::I8(a), b) | (b, Number::I8(a)) => {
+                    Number::I8(a $operation Wrapping(b.as_u64() as i8))
+                }
+                (Number::Char(a), Number::Char(b)) => { Number::Char(a $operation b) }
             }
         }
     };
@@ -71,10 +76,10 @@ macro_rules! binary_operation {
 
 macro_rules! binary_shift_operation {
     ($operation_name:ident, $operation:tt) => {
-        pub fn $operation_name(self, other: Number) -> AnalyzeResult<Number> {
+        pub(crate)  fn $operation_name(self, other: Number) -> ObjectResult<Number> {
             Ok(match (self, other) {
                 (Number::F64(_) | Number::F32(_), _) => {
-                    return Err(AnalyzeError::IntOperationOnFloat);
+                    return Err(ObjectError::IntOperationOnFloat);
                 }
                 (Number::U64(a), b) | (b, Number::U64(a)) => Number::U64(a $operation b.as_u64() as usize),
                 (Number::I64(a), b) | (b, Number::I64(a)) => Number::I64(a $operation b.as_u64() as usize),
@@ -83,7 +88,8 @@ macro_rules! binary_shift_operation {
                 (Number::U16(a), b) | (b, Number::U16(a)) => Number::U16(a $operation b.as_u64() as usize),
                 (Number::I16(a), b) | (b, Number::I16(a)) => Number::I16(a $operation b.as_u64() as usize),
                 (Number::U8(a), b) | (b, Number::U8(a)) => Number::U8(a $operation b.as_u64() as usize),
-                (Number::I8(a), b) => Number::I8(a $operation b.as_u64() as usize),
+                (Number::I8(a), b) | (b, Number::I8(a)) => Number::I8(a $operation b.as_u64() as usize),
+                (Number::Char(a), b) => Number::Char(a $operation b.as_u64() as usize),
             })
         }
     };
@@ -91,10 +97,10 @@ macro_rules! binary_shift_operation {
 
 macro_rules! binary_int_operation {
     ($operation_name:ident, $operation:tt) => {
-        pub fn $operation_name(self, other: Number) -> AnalyzeResult<Number> {
+        pub(crate)  fn $operation_name(self, other: Number) -> ObjectResult<Number> {
             Ok(match (self, other) {
                 (Number::F64(_) | Number::F32(_), _) => {
-                    return Err(AnalyzeError::IntOperationOnFloat);
+                    return Err(ObjectError::IntOperationOnFloat);
                 }
                 (Number::U64(a), b) | (b, Number::U64(a)) => Number::U64(a $operation Wrapping(b.as_u64())),
                 (Number::I64(a), b) | (b, Number::I64(a)) => Number::I64(a $operation Wrapping(b.as_u64() as i64)),
@@ -103,7 +109,8 @@ macro_rules! binary_int_operation {
                 (Number::U16(a), b) | (b, Number::U16(a)) => Number::U16(a $operation Wrapping(b.as_u64() as u16)),
                 (Number::I16(a), b) | (b, Number::I16(a)) => Number::I16(a $operation  Wrapping(b.as_u64() as i16)),
                 (Number::U8(a), b) | (b, Number::U8(a)) => Number::U8(a $operation  Wrapping(b.as_u64() as u8)),
-                (Number::I8(a), b) => Number::I8(a $operation  Wrapping(b.as_u64() as i8)),
+                (Number::I8(a), b) | (b, Number::I8(a)) => Number::I8(a $operation  Wrapping(b.as_u64() as i8)),
+                (Number::Char(a), b) => Number::Char(a $operation  Wrapping(b.as_u64() as u8)),
             })
         }
     };
@@ -111,7 +118,7 @@ macro_rules! binary_int_operation {
 
 macro_rules! equality_operation {
     ($operation_name:ident, $operation:tt) => {
-        pub fn $operation_name(self, other: Number) -> Number {
+        pub(crate)  fn $operation_name(self, other: Number) -> Number {
             let result = match (&self, &other) {
                 (Number::F64(_) | Number::F32(_), _) | (_, Number::F64(_) | Number::F32(_)) => {
                     self.as_f64() $operation other.as_f64()
@@ -124,8 +131,9 @@ macro_rules! equality_operation {
 }
 
 impl Number {
-    pub fn bitsize(&self) -> u8 {
+    pub(crate) fn bitsize(&self) -> u8 {
         match self {
+            Number::Char(_) => 8,
             Number::U8(_) => 8,
             Number::I8(_) => 8,
             Number::U16(_) => 16,
@@ -139,9 +147,11 @@ impl Number {
         }
     }
 
-    pub fn signed(&self) -> bool {
+    pub(crate) fn signed(&self) -> bool {
         match self {
-            Number::U8(_) | Number::U16(_) | Number::U32(_) | Number::U64(_) => false,
+            Number::Char(_) | Number::U8(_) | Number::U16(_) | Number::U32(_) | Number::U64(_) => {
+                false
+            }
             Number::I8(_)
             | Number::I16(_)
             | Number::I32(_)
@@ -151,12 +161,13 @@ impl Number {
         }
     }
 
-    pub fn float(&self) -> bool {
+    pub(crate) fn float(&self) -> bool {
         matches!(self, Number::F32(_) | Number::F64(_))
     }
 
-    pub fn as_u64(&self) -> u64 {
+    pub(crate) fn as_u64(&self) -> u64 {
         match self {
+            Number::Char(v) => v.0 as u64,
             Number::U8(v) => v.0 as u64,
             Number::I8(v) => v.0 as u64,
             Number::U16(v) => v.0 as u64,
@@ -170,8 +181,9 @@ impl Number {
         }
     }
 
-    pub fn as_f64(&self) -> f64 {
+    pub(crate) fn as_f64(&self) -> f64 {
         match self {
+            Number::Char(v) => v.0 as f64,
             Number::U8(v) => v.0 as f64,
             Number::I8(v) => v.0 as f64,
             Number::U16(v) => v.0 as f64,
@@ -185,8 +197,9 @@ impl Number {
         }
     }
 
-    pub fn as_bool(&self) -> bool {
+    pub(crate) fn as_bool(&self) -> bool {
         match self {
+            Number::Char(v) => v.0 != 0,
             Number::U8(v) => v.0 != 0,
             Number::I8(v) => v.0 != 0,
             Number::U16(v) => v.0 != 0,
@@ -197,6 +210,22 @@ impl Number {
             Number::I64(v) => v.0 != 0,
             Number::F32(v) => *v != 0.,
             Number::F64(v) => *v != 0.,
+        }
+    }
+
+    pub(crate) fn cast(&self, target_type: NumberType) -> Number {
+        match target_type {
+            NumberType::Char => Number::Char(Wrapping(self.as_u64() as u8)),
+            NumberType::U8 => Number::U8(Wrapping(self.as_u64() as u8)),
+            NumberType::I8 => Number::I8(Wrapping(self.as_u64() as i8)),
+            NumberType::U16 => Number::U16(Wrapping(self.as_u64() as u16)),
+            NumberType::I16 => Number::I16(Wrapping(self.as_u64() as i16)),
+            NumberType::U32 => Number::U32(Wrapping(self.as_u64() as u32)),
+            NumberType::I32 => Number::I32(Wrapping(self.as_u64() as i32)),
+            NumberType::U64 => Number::U64(Wrapping(self.as_u64())),
+            NumberType::I64 => Number::I64(Wrapping(self.as_u64() as i64)),
+            NumberType::F32 => Number::F32(self.as_f64() as f32),
+            NumberType::F64 => Number::F64(self.as_f64()),
         }
     }
 
@@ -218,12 +247,13 @@ impl Number {
     binary_int_operation!(bitwise_xor, ^);
     binary_int_operation!(bitwise_or, |);
 
-    pub fn logical_not(self) -> Number {
+    pub(crate) fn logical_not(self) -> Number {
         Number::U8(Wrapping((!self.as_bool()) as u8))
     }
 
-    pub fn bitwise_not(self) -> AnalyzeResult<Number> {
+    pub(crate) fn bitwise_not(self) -> ObjectResult<Number> {
         Ok(match self {
+            Number::Char(v) => Number::Char(!v),
             Number::U8(v) => Number::U8(!v),
             Number::I8(v) => Number::I8(!v),
             Number::U16(v) => Number::U16(!v),
@@ -233,16 +263,16 @@ impl Number {
             Number::U64(v) => Number::U64(!v),
             Number::I64(v) => Number::I64(!v),
             Number::F32(_) | Number::F64(_) => {
-                return Err(AnalyzeError::GenericError("can't bitwise not a float"))
+                return Err(ObjectError::GenericError("can't bitwise not a float"))
             }
         })
     }
 
-    pub fn logical_and(self, other: Number) -> Number {
+    pub(crate) fn logical_and(self, other: Number) -> Number {
         Number::U8(Wrapping((self.as_bool() && other.as_bool()) as u8))
     }
 
-    pub fn logical_or(self, other: Number) -> Number {
+    pub(crate) fn logical_or(self, other: Number) -> Number {
         Number::U8(Wrapping((self.as_bool() && other.as_bool()) as u8))
     }
 }

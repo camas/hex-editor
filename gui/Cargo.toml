@@ -34,3 +34,5 @@ num = "*"
 # TODO: Change when automatic_layout stable
 monaco = { git = "https://github.com/siku2/rust-monaco" }
 git-version = "*"
+rand = "*"
+getrandom = { version = "*", features = ["js"] }
