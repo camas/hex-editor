@@ -305,4 +305,20 @@ impl NumberType {
     pub(crate) fn float(&self) -> bool {
         matches!(self, NumberType::F32 | NumberType::F64)
     }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NumberType::Char => "char",
+            NumberType::U8 => "u8",
+            NumberType::I8 => "i8",
+            NumberType::U16 => "u16",
+            NumberType::I16 => "i16",
+            NumberType::U32 => "u32",
+            NumberType::I32 => "i32",
+            NumberType::U64 => "u64",
+            NumberType::I64 => "i64",
+            NumberType::F32 => "f32",
+            NumberType::F64 => "f64",
+        }
+    }
 }

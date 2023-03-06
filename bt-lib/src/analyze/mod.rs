@@ -72,6 +72,7 @@ pub struct AnalyzedData {
     pub stdout: Vec<u8>,
 }
 
+// TODO: Should return as much data as possible on error
 pub fn analyze_data(
     program: &BtProgram,
     data: &mut Box<dyn DataSourceTraits>,
@@ -194,7 +195,7 @@ impl<'a> ExecutionContext<'a> {
                 self.push(Object::Array(NumberArray::Char(value.clone())));
             }
             Instruction::PushWideString(value) => {
-                // TODO: Handle wide strings properly
+                // TODO: Handle wide strings properly. Handle arbitrary encodings?
                 self.push(Object::Array(NumberArray::Char(value.clone())));
             }
             Instruction::PushBool(value) => {

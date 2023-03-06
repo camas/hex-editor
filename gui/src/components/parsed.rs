@@ -182,7 +182,10 @@ fn object_to_string_data(object: &Object, data_info: &DataInfo) -> (String, Stri
                 (*size).min(ARRAY_DATA_LIMIT),
                 &mut data_info.provider.get_reader_mut(),
             );
-            object_to_string_data(&object, data_info)
+            (
+                format!("{}[{}]", number_type.as_str(), size),
+                object_to_string_data(&object, data_info).1,
+            )
         }
         bt_lib::Object::Struct(_) => todo!(),
         bt_lib::Object::VariableRef(_)
