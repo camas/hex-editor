@@ -2,9 +2,10 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::{
     instruction::{
-        Attribute, BasicFunction, FunctionRef, Instruction, LabelRef, StructRef, VariableRef,
+        Attribute, BasicFunction, CodeBlockRef, Color, FunctionRef, Instruction, LabelRef,
+        StructRef, VariableRef,
     },
-    object::{NumberType, ObjectType},
+    object::{number::NumberType, ObjectType},
     parse::{
         AttributeValue, BinaryOperator, CodeBlockArg, Expression, Number, ObjectRef, ParsedData,
         Statement, TypeDeclaration, UnaryOperator,
@@ -61,12 +62,6 @@ pub struct CodeBlock {
     pub instructions: Vec<Instruction>,
     pub return_type: ObjectType,
     pub label_offsets: Vec<usize>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CodeBlockRef {
-    Function(FunctionRef),
-    Struct(StructRef),
 }
 
 #[derive(Debug)]
@@ -151,6 +146,7 @@ struct TransformContextStackItem {
     variables: HashMap<String, VariableRef>,
     label_ref_count: u64,
     code_block_ref: CodeBlockRef,
+    color: Option<Color>,
 }
 
 impl TransformContext {
@@ -249,7 +245,7 @@ impl TransformContext {
                     ))
                 }
             },
-            _ => todo!(),
+            o => todo!("{:?}", o),
         })
     }
 
@@ -348,6 +344,7 @@ impl TransformContext {
             variables,
             code_block_ref: CodeBlockRef::Function(function_ref),
             label_ref_count: 0,
+            color: None,
         });
 
         Ok(())
@@ -358,6 +355,7 @@ impl TransformContext {
         object_ref: ObjectRef,
         args: Vec<CodeBlockArg>,
         return_type: TypeDeclaration,
+        color: Option<Color>,
     ) -> TransformResult<()> {
         let struct_ref = match object_ref {
             ObjectRef::Struct(i) => StructRef(i),
@@ -389,6 +387,7 @@ impl TransformContext {
             variables,
             code_block_ref: CodeBlockRef::Struct(struct_ref),
             label_ref_count: 0,
+            color,
         });
 
         Ok(())
@@ -414,11 +413,11 @@ impl TransformContext {
         self.stack.pop();
     }
 
-    fn next_background_color(&mut self) -> u32 {
+    fn next_background_color(&mut self) -> Color {
         let next_value = (self.background_color_index + 1) % BACKGROUND_COLORS.len();
         let color = BACKGROUND_COLORS[self.background_color_index];
         self.background_color_index = next_value;
-        color
+        Color(color)
     }
 
     fn transform_statement(&mut self, statement: Statement) -> TransformResult<()> {
@@ -465,12 +464,16 @@ impl TransformContext {
                     if arg_count != 0 {
                         todo!("Args not implemented yet");
                     }
-
-                    let attributes = self.transform_attributes(attributes);
-
                     // for arg_expression in args {
                     //     self.queue_expression(arg_expression);
                     // }
+
+                    let mut color = None;
+                    for attribute in self.transform_attributes(attributes) {
+                        match attribute {
+                            Attribute::Color(v) => color = Some(v),
+                        }
+                    }
 
                     match object_type {
                         TypeDeclaration::Normal(object_type) => {
@@ -480,19 +483,16 @@ impl TransformContext {
                                 variable_ref,
                                 object_type,
                                 arg_count,
-                                attributes,
+                                color,
                             });
                         }
-                        TypeDeclaration::Array {
-                            type_name: name,
-                            size,
-                        } => {
-                            let number_type = self.resolve_number_type(&name)?;
+                        TypeDeclaration::Array { type_name, size } => {
+                            let object_type = self.resolve_object_type(&type_name)?;
                             self.queue_instruction(Instruction::ReadArray {
                                 name,
                                 variable_ref,
-                                number_type,
-                                attributes,
+                                object_type,
+                                color,
                             });
                             self.queue_expression(size);
                         }
@@ -540,11 +540,11 @@ impl TransformContext {
                         type_name: object_type,
                         size,
                     } => {
-                        self.queue_expression(size);
                         self.queue_instruction(Instruction::DeclareArray {
                             variable_ref,
                             number_type: self.resolve_number_type(&object_type)?,
                         });
+                        self.queue_expression(size);
                     }
                     TypeDeclaration::UnsizedArray { .. } => {
                         return Err(TransformError::DeclareUnsizedArray)
@@ -591,12 +591,17 @@ impl TransformContext {
                 statements,
                 attributes,
             } => {
-                // TODO: Add default attributes to struct
+                let mut color = None;
+                for attribute in self.transform_attributes(attributes) {
+                    match attribute {
+                        Attribute::Color(v) => color = Some(v),
+                    }
+                }
 
                 let instance_name =
                     instance_name.unwrap_or(TypeDeclaration::Normal("void".to_string()));
 
-                self.start_struct(object_ref, args, instance_name)?;
+                self.start_struct(object_ref, args, instance_name, color)?;
 
                 self.queue_pop_stack();
                 statements
@@ -703,6 +708,7 @@ impl TransformContext {
                 }
                 self.queue_instruction(Instruction::Label(loop_start_label_ref));
                 if let Some(initialization) = initialization {
+                    self.queue_instruction(Instruction::Pop);
                     self.queue_expression(initialization);
                 }
             }
@@ -735,11 +741,15 @@ impl TransformContext {
                 attribute
             })
             .collect::<Vec<_>>();
-        if self.options.auto_add_colors
-            && !attributes.iter().any(|a| matches!(a, Attribute::Color(_)))
-        {
-            attributes.push(Attribute::Color(self.next_background_color()));
+
+        if !attributes.iter().any(|a| matches!(a, Attribute::Color(_))) {
+            if let Some(stack_color) = self.stack.last().unwrap().color {
+                attributes.push(Attribute::Color(stack_color));
+            } else if self.options.auto_add_colors {
+                attributes.push(Attribute::Color(self.next_background_color()));
+            }
         }
+
         attributes
     }
 
@@ -887,7 +897,7 @@ impl TransformContext {
                 Number::F64(value) => Instruction::PushF64(value),
             }),
             Expression::DeclareArrayValues(array_values) => {
-                let array_value_count = array_values.len();
+                let array_value_count = array_values.len() as u64;
 
                 self.queue_instruction(Instruction::DeclareArrayValues(array_value_count));
                 for array_value in array_values.into_iter().rev() {
@@ -909,9 +919,8 @@ impl Attribute {
     }
 }
 
-fn get_color_from_attribute(attribute_value: &AttributeValue) -> u32 {
-    // TODO: Handle this during transform
-    match attribute_value {
+fn get_color_from_attribute(attribute_value: &AttributeValue) -> Color {
+    Color(match attribute_value {
         AttributeValue::String(_) => todo!(),
         AttributeValue::Character(_) => todo!(),
         AttributeValue::Number(n) => match n {
@@ -924,5 +933,5 @@ fn get_color_from_attribute(attribute_value: &AttributeValue) -> u32 {
             crate::parse::Number::F64(v) => *v as u32,
         },
         AttributeValue::Identifier(_) => todo!(),
-    }
+    })
 }

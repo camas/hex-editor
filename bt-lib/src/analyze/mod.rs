@@ -1,11 +1,18 @@
-use std::{collections::HashMap, io::SeekFrom};
+use std::{
+    collections::{HashMap, HashSet},
+    io::SeekFrom,
+    num::Wrapping,
+};
 
 use common::{DataSourceTraits, Reader};
 
 use crate::{
-    instruction::{Attribute, BasicFunction, FunctionRef, Instruction, VariableRef},
-    object::{NumberArray, NumberType, Object, ObjectError, ObjectType},
+    instruction::{
+        Attribute, BasicFunction, CodeBlockRef, FunctionRef, Instruction, StructRef, VariableRef,
+    },
+    object::{number::NumberType, NumberArray, Object, ObjectError, ObjectResult, ObjectType},
     transform::{BtProgram, CodeBlock},
+    Number,
 };
 
 use self::parsed::{ParsedObject, ParsedObjects};
@@ -34,6 +41,8 @@ pub enum AnalyzeError {
     GenericError(&'static str),
     #[error("Object error")]
     ObjectError(#[from] ObjectError),
+    #[error("Index is out of bounds of the array")]
+    IndexOutOfBounds,
 }
 
 type AnalyzeResult<T> = Result<T, AnalyzeError>;
@@ -52,16 +61,9 @@ struct ExecutionContext<'a> {
 #[derive(Debug)]
 struct CodeBlockContext {
     variables: HashMap<VariableRef, Object>,
-    code_block_ref: FunctionRef,
+    code_block_ref: CodeBlockRef,
     instruction_pointer: usize,
-    code_block_type: CodeBlockType,
     color: Option<u32>,
-}
-
-#[derive(Debug)]
-enum CodeBlockType {
-    Function,
-    Struct,
 }
 
 #[derive(Debug)]
@@ -94,7 +96,8 @@ pub fn analyze_data(
     // TODO: Throw errors instead. Should probably remove any assert in this file
     assert!(context.code_block_stack.is_empty());
     // Script is treated as a function so returns void when exiting
-    assert_eq!(context.object_stack, vec![Object::Void]);
+    assert_eq!(context.object_stack.len(), 1);
+    assert_eq!(context.object_stack[0].as_type(), ObjectType::Void);
 
     Ok(AnalyzedData {
         parsed_objects: context.parsed_objects.objects,
@@ -114,34 +117,51 @@ impl<'a> ExecutionContext<'a> {
 
         macro_rules! unary_instr {
             ($method:ident) => {{
-                let result = self.pop_resolve().$method()?;
+                let result = self.pop_resolve()?.$method()?;
                 self.push(result);
             }};
         }
 
         macro_rules! binary_instr {
             ($method:ident) => {{
-                let result = self.pop_resolve().$method(self.pop_resolve())?;
+                let result = self.pop_resolve()?.$method(self.pop_resolve()?)?;
                 self.push(result);
             }};
         }
 
         macro_rules! assign_instr {
             ($method:ident) => {{
-                let variable_ref = self.pop_ref()?;
-                let value = self.pop_resolve();
-                let new_value = self
-                    .variable(variable_ref)
-                    .unwrap()
-                    // TODO: Shouldn't need to be cloned
-                    .clone()
-                    .$method(value)?;
-                self.set_variable(variable_ref, new_value);
-                self.push(Object::VariableRef(variable_ref));
+                let target_ref = self.pop_ref()?;
+                let value = self.pop_resolve()?;
+                match target_ref {
+                    Object::VariableRef(variable_ref) => {
+                        let mut tmp_object = Object::Void;
+                        let variable = self.variable_mut(variable_ref);
+                        std::mem::swap(variable, &mut tmp_object);
+                        let new_object = tmp_object.$method(value)?;
+                        *variable = new_object;
+                        self.push(Object::VariableRef(variable_ref));
+                    }
+                    Object::ArrayEntryRef {
+                        variable_ref,
+                        index,
+                    } => {
+                        let object = self.variable_mut(variable_ref);
+                        let Object::Array(array) = object else {
+                                        return Err(AnalyzeError::GenericError("Not an array"));
+                                    };
+                        array.$method(index, value)?;
+                        self.push(Object::Void); // TODO: Return an actual value? Throw an error?
+                    }
+                    _ => unreachable!(),
+                }
             }};
         }
 
         let instruction = &code_block.instructions[code_block_context.instruction_pointer];
+
+        // println!("{:?}", self.object_stack);
+        // println!("{:?}", instruction);
 
         match instruction {
             Instruction::Pop => {
@@ -150,7 +170,21 @@ impl<'a> ExecutionContext<'a> {
             Instruction::PopVariable(variable_ref) => {
                 let variable_ref = *variable_ref;
                 let value = self.pop();
-                self.set_variable(variable_ref, value);
+                match value {
+                    // Special case: Assign temp values to an array
+                    Object::TempArray(values) => {
+                        let Object::Array(array) = self.variable_mut(variable_ref) else {
+                            return Err(AnalyzeError::GenericError("not an array"));
+                        };
+                        if array.len() != values.len() {
+                            return Err(AnalyzeError::GenericError("Wrong size array"));
+                        }
+                        array.set_values(values)?;
+                    }
+                    value => {
+                        *self.variable_mut(variable_ref) = value;
+                    }
+                }
             }
             Instruction::PushVariable(variable_ref) => {
                 let variable_ref = *variable_ref;
@@ -195,7 +229,7 @@ impl<'a> ExecutionContext<'a> {
                 object_type,
             } => {
                 let object = object_type.create_default()?;
-                self.set_variable(*variable_ref, object);
+                self.initialize_variable(*variable_ref, object);
             }
             Instruction::DeclareArray {
                 variable_ref,
@@ -204,7 +238,7 @@ impl<'a> ExecutionContext<'a> {
                 let variable_ref = *variable_ref;
                 let number_type = *number_type;
 
-                let size = match self.pop_resolve() {
+                let size = match self.pop_resolve()? {
                     Object::Number(v) => v.as_u64(),
                     _ => return Err(AnalyzeError::GenericError("Invalid type for array size")),
                 } as usize;
@@ -221,65 +255,49 @@ impl<'a> ExecutionContext<'a> {
                     NumberType::F32 => NumberArray::F32(vec![0.; size]),
                     NumberType::F64 => NumberArray::F64(vec![0.; size]),
                 });
-                self.set_variable(variable_ref, object);
+                self.initialize_variable(variable_ref, object);
             }
             Instruction::ReadObject {
                 name,
                 variable_ref,
                 object_type,
                 arg_count,
-                attributes,
+                color,
             } => {
                 if *arg_count > 0 {
                     todo!();
                 }
 
-                let mut color = None;
-                for attribute in attributes {
-                    match attribute {
-                        Attribute::Color(v) => color = Some(*v),
-                    }
-                }
-
                 let variable_ref = *variable_ref;
                 let object_type = *object_type;
                 let name = name.clone();
+                let color = *color;
 
                 let start = self.reader.position()?;
                 let value = self.read_object(object_type)?;
                 let end = self.reader.position()?.max(start + 1) - 1;
 
-                self.set_variable(variable_ref, value.clone());
+                self.initialize_variable(variable_ref, value.clone());
                 self.parsed_objects.add(name, value, start, end, color);
             }
             Instruction::ReadArray {
                 name,
                 variable_ref,
-                number_type,
-                attributes,
+                object_type: number_type,
+                color,
             } => {
                 let variable_ref = *variable_ref;
                 let number_type = *number_type;
                 let name = name.clone();
+                let color = *color;
 
-                let mut bg_color = None;
-                for attribute in attributes {
-                    match attribute {
-                        Attribute::Color(v) => bg_color = Some(*v),
-                    }
-                }
-
-                let size = match self.pop_resolve() {
-                    Object::Number(v) => v.as_u64(),
-                    _ => return Err(AnalyzeError::GenericError("Invalid type for array size")),
-                } as usize;
-
+                let size = self.pop_u64()?;
                 let start = self.reader.position()?;
-                let value = self.read_array(number_type, size)?;
+                let value = self.read_array_lazy(number_type, size)?;
                 let end = self.reader.position()?.max(start + 1) - 1;
 
-                self.set_variable(variable_ref, value.clone());
-                self.parsed_objects.add(name, value, start, end, bg_color);
+                self.initialize_variable(variable_ref, value.clone());
+                self.parsed_objects.add(name, value, start, end, color);
             }
             Instruction::Cast(target) => {
                 let target = *target;
@@ -299,7 +317,7 @@ impl<'a> ExecutionContext<'a> {
 
                 let mut args = (0..arg_count)
                     .map(|_| self.pop_resolve())
-                    .collect::<Vec<_>>();
+                    .collect::<AnalyzeResult<Vec<_>>>()?;
 
                 let code_block = self.curr_code_block();
 
@@ -311,22 +329,14 @@ impl<'a> ExecutionContext<'a> {
 
                 for (arg, arg_ref) in args.iter_mut().zip(code_block.args.iter()) {
                     if arg.as_type() != arg_ref.0 {
-                        if matches!(arg, Object::Number(_))
-                            && matches!(arg_ref.0, ObjectType::Number(_))
-                        {
-                            // TODO: Probably a better way than this
-                            let mut swap_arg = Object::Void;
-                            std::mem::swap(arg, &mut swap_arg);
-                            *arg = swap_arg.cast(arg_ref.0)?;
-                        } else {
-                            return Err(AnalyzeError::GenericError("Invalid argument type"));
-                        }
+                        // Try auto casting arguments
+                        *arg = arg.cast(arg_ref.0)?;
                     }
                 }
 
                 let var_refs = code_block.args.iter().map(|a| a.1).collect::<Vec<_>>();
                 for (arg, var_ref) in args.into_iter().zip(var_refs.into_iter()) {
-                    self.set_variable(var_ref, arg);
+                    self.initialize_variable(var_ref, arg);
                 }
 
                 return Ok(());
@@ -339,7 +349,7 @@ impl<'a> ExecutionContext<'a> {
 
                 let args = (0..*arg_count)
                     .map(|_| self.pop_resolve())
-                    .collect::<Vec<_>>();
+                    .collect::<AnalyzeResult<Vec<_>>>()?;
 
                 let mut return_value = Object::Void;
                 match basic_function {
@@ -370,37 +380,181 @@ impl<'a> ExecutionContext<'a> {
                 self.push(Object::Void);
                 self.exit_code_block()?;
             }
-            Instruction::GetArrayIndex => todo!(),
+            Instruction::GetArrayIndex => {
+                let object = self.pop();
+                let index = self.pop_u64()? as usize;
+
+                let new_object = match object {
+                    Object::Array(number_array) => match number_array {
+                        NumberArray::Char(v) => Object::new_char(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::U8(v) => Object::new_u8(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::I8(v) => Object::new_i8(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::U16(v) => Object::new_u16(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::I16(v) => Object::new_i16(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::U32(v) => Object::new_u32(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::I32(v) => Object::new_i32(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::U64(v) => Object::new_u64(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::I64(v) => Object::new_i64(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::F32(v) => Object::new_f32(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                        NumberArray::F64(v) => Object::new_f64(
+                            v.into_iter()
+                                .nth(index)
+                                .ok_or(AnalyzeError::IndexOutOfBounds)?,
+                        ),
+                    },
+                    Object::VariableRef(variable_ref) => {
+                        let variable = self.variable(variable_ref);
+                        match variable {
+                            Object::Array(number_array) => {
+                                if index >= number_array.len() {
+                                    return Err(AnalyzeError::IndexOutOfBounds);
+                                }
+                            }
+                            Object::ArrayRef { size, .. } => {
+                                if index as u64 >= *size {
+                                    return Err(AnalyzeError::IndexOutOfBounds);
+                                }
+                            }
+                            _ => {
+                                return Err(AnalyzeError::GenericError(
+                                    "Can't index an object that isn't an array",
+                                ))
+                            }
+                        }
+                        Object::ArrayEntryRef {
+                            variable_ref,
+                            index: index as u64,
+                        }
+                    }
+                    _ => return Err(AnalyzeError::GenericError("Can't index this type")),
+                };
+                self.push(new_object);
+            }
             Instruction::GetMember(_) => todo!(),
-            Instruction::DeclareArrayValues(_) => todo!(),
+            Instruction::DeclareArrayValues(size) => {
+                let mut values = (0..*size)
+                    .map(|_| self.pop_resolve())
+                    .collect::<AnalyzeResult<Vec<_>>>()?;
+                values.reverse();
+                for value in values.iter() {
+                    if !matches!(value.as_type(), ObjectType::Number(_)) {
+                        return Err(AnalyzeError::GenericError("Can only declare numeric types"));
+                    }
+                }
+                self.push(Object::TempArray(values));
+            }
             // Suffixed changes the variable _after_ returning it's value
             Instruction::SuffixIncrement => {
-                let variable_ref = self.pop_ref()?;
-                let value = self.variable(variable_ref).unwrap().clone();
-                self.push(value.clone());
-                let value = value.add(Object::new_u8(1))?;
-                self.set_variable(variable_ref, value);
+                let target_ref = self.pop_ref()?;
+                match target_ref {
+                    Object::VariableRef(variable_ref) => {
+                        let value = self.variable(variable_ref);
+                        let new_value = value.clone().add(Object::new_u8(1))?;
+                        self.push(value.clone());
+                        *self.variable_mut(variable_ref) = new_value;
+                    }
+                    Object::ArrayEntryRef {
+                        variable_ref,
+                        index,
+                    } => {
+                        todo!();
+                    }
+                    _ => unreachable!(),
+                }
             }
             Instruction::SuffixDecrement => {
-                let variable_ref = self.pop_ref()?;
-                let value = self.variable(variable_ref).unwrap().clone();
-                self.push(value.clone());
-                let value = value.subtract(Object::new_u8(1))?;
-                self.set_variable(variable_ref, value);
+                let target_ref = self.pop_ref()?;
+                match target_ref {
+                    Object::VariableRef(variable_ref) => {
+                        let value = self.variable(variable_ref);
+                        let new_value = value.clone().subtract(Object::new_u8(1))?;
+                        self.push(value.clone());
+                        *self.variable_mut(variable_ref) = new_value;
+                    }
+                    Object::ArrayEntryRef {
+                        variable_ref,
+                        index,
+                    } => {
+                        todo!();
+                    }
+                    _ => unreachable!(),
+                }
             }
             Instruction::PrefixIncrement => {
-                let variable_ref = self.pop_ref()?;
-                let value = self.variable(variable_ref).unwrap().clone();
-                let value = value.add(Object::new_u8(1))?;
-                self.push(value.clone());
-                self.set_variable(variable_ref, value);
+                let target_ref = self.pop_ref()?;
+                match target_ref {
+                    Object::VariableRef(variable_ref) => {
+                        let value = self.variable_mut(variable_ref);
+                        let new_value = value.clone().add(Object::new_u8(1))?;
+                        *value = new_value.clone();
+                        self.push(new_value);
+                    }
+                    Object::ArrayEntryRef {
+                        variable_ref,
+                        index,
+                    } => {
+                        todo!();
+                    }
+                    _ => unreachable!(),
+                }
             }
             Instruction::PrefixDecrement => {
-                let variable_ref = self.pop_ref()?;
-                let value = self.variable(variable_ref).unwrap().clone();
-                let value = value.subtract(Object::new_u8(1))?;
-                self.push(value.clone());
-                self.set_variable(variable_ref, value);
+                let target_ref = self.pop_ref()?;
+                match target_ref {
+                    Object::VariableRef(variable_ref) => {
+                        let value = self.variable_mut(variable_ref);
+                        let new_value = value.clone().subtract(Object::new_u8(1))?;
+                        *value = new_value.clone();
+                        self.push(new_value);
+                    }
+                    Object::ArrayEntryRef {
+                        variable_ref,
+                        index,
+                    } => {
+                        todo!();
+                    }
+                    _ => unreachable!(),
+                }
             }
             Instruction::Positive => {}
             Instruction::Negate => unary_instr!(negate),
@@ -425,9 +579,35 @@ impl<'a> ExecutionContext<'a> {
             Instruction::LogicalAnd => binary_instr!(logical_and),
             Instruction::LogicalOr => binary_instr!(logical_or),
             Instruction::Assign => {
-                let variable_ref = self.pop_ref()?;
-                let value = self.pop_resolve();
-                self.set_variable(variable_ref, value);
+                let target_ref = self.pop_ref()?;
+                let value = self.pop_resolve()?;
+                match target_ref {
+                    Object::VariableRef(variable_ref) => {
+                        match value {
+                            // Special case: Assign temp values to an array
+                            Object::TempArray(values) => {
+                                let Object::Array(array) = self.variable_mut(variable_ref) else {
+                            return Err(AnalyzeError::GenericError("not an array"));
+                        };
+                                if array.len() != values.len() {
+                                    return Err(AnalyzeError::GenericError("Wrong size array"));
+                                }
+                                array.set_values(values)?;
+                            }
+                            value => {
+                                *self.variable_mut(variable_ref) = value;
+                            }
+                        }
+                        self.push(Object::VariableRef(variable_ref));
+                    }
+                    Object::ArrayEntryRef {
+                        variable_ref,
+                        index,
+                    } => {
+                        todo!();
+                    }
+                    _ => unreachable!(),
+                }
             }
             Instruction::AssignAdd => assign_instr!(add),
             Instruction::AssignSubtract => assign_instr!(subtract),
@@ -446,7 +626,7 @@ impl<'a> ExecutionContext<'a> {
             }
             Instruction::JumpTrue(label_ref) => {
                 let label_ref_index = label_ref.0 as usize;
-                let value = match self.pop_resolve() {
+                let value = match self.pop_resolve()? {
                     Object::Number(v) => v.as_bool(),
                     _ => return Err(AnalyzeError::GenericError("not a bool")),
                 };
@@ -457,7 +637,7 @@ impl<'a> ExecutionContext<'a> {
             }
             Instruction::JumpFalse(label_ref) => {
                 let label_ref_index = label_ref.0 as usize;
-                let value = match self.pop_resolve() {
+                let value = match self.pop_resolve()? {
                     Object::Number(v) => v.as_bool(),
                     _ => return Err(AnalyzeError::GenericError("not a bool")),
                 };
@@ -480,15 +660,23 @@ impl<'a> ExecutionContext<'a> {
         self.object_stack.pop().unwrap()
     }
 
-    fn pop_resolve(&mut self) -> Object {
+    fn pop_resolve(&mut self) -> AnalyzeResult<Object> {
         let object = self.pop();
         self.resolve_object(object)
     }
 
-    fn pop_ref(&mut self) -> AnalyzeResult<VariableRef> {
-        match self.pop() {
-            Object::VariableRef(variable_ref) => Ok(variable_ref),
+    fn pop_ref(&mut self) -> AnalyzeResult<Object> {
+        let object = self.pop();
+        match &object {
+            Object::VariableRef(_) | Object::ArrayEntryRef { .. } => Ok(object),
             _ => Err(AnalyzeError::GenericError("not a ref")),
+        }
+    }
+
+    fn pop_u64(&mut self) -> AnalyzeResult<u64> {
+        match self.pop_resolve()? {
+            Object::Number(v) => Ok(v.as_u64()),
+            _ => Err(AnalyzeError::GenericError("Popped stack item not a number")),
         }
     }
 
@@ -499,33 +687,31 @@ impl<'a> ExecutionContext<'a> {
     fn enter_function(&mut self, function_ref: FunctionRef) {
         self.code_block_stack.push(CodeBlockContext {
             variables: HashMap::new(),
-            code_block_ref: function_ref,
+            code_block_ref: CodeBlockRef::Function(function_ref),
             instruction_pointer: 0,
-            code_block_type: CodeBlockType::Function,
             color: None,
         });
     }
 
-    // fn enter_struct(&mut self, struct_ref: StructRef) {
-    //     self.code_block_stack.push(CodeBlockContext {
-    //         variables: HashMap::new(),
-    //         code_block_ref: struct_ref,
-    //         instruction_pointer: 0,
-    //         code_block_type: CodeBlockType::Struct,
-    //         color: None,
-    //     })
-    // }
+    fn enter_struct(&mut self, struct_ref: StructRef) {
+        self.code_block_stack.push(CodeBlockContext {
+            variables: HashMap::new(),
+            code_block_ref: CodeBlockRef::Struct(struct_ref),
+            instruction_pointer: 0,
+            color: None,
+        })
+    }
 
     fn exit_code_block(&mut self) -> AnalyzeResult<()> {
-        match self.curr_code_block_context().code_block_type {
-            CodeBlockType::Function => {
+        match self.curr_code_block_context().code_block_ref {
+            CodeBlockRef::Function(_) => {
                 self.push(Object::Void);
                 let stack_top = self.object_stack.last().unwrap();
                 if self.curr_code_block().return_type != stack_top.as_type() {
                     return Err(AnalyzeError::GenericError("Function returned wrong type"));
                 }
             }
-            CodeBlockType::Struct => todo!(),
+            CodeBlockRef::Struct(_) => todo!(),
         }
 
         self.code_block_stack.pop();
@@ -534,7 +720,10 @@ impl<'a> ExecutionContext<'a> {
     }
 
     fn curr_code_block(&self) -> &CodeBlock {
-        &self.program.functions[self.code_block_stack.last().unwrap().code_block_ref.0 as usize]
+        match self.code_block_stack.last().unwrap().code_block_ref {
+            CodeBlockRef::Function(fn_ref) => &self.program.functions[fn_ref.0 as usize],
+            CodeBlockRef::Struct(struct_ref) => &self.program.structs[struct_ref.0 as usize],
+        }
     }
 
     fn curr_code_block_context(&self) -> &CodeBlockContext {
@@ -607,80 +796,152 @@ impl<'a> ExecutionContext<'a> {
         })
     }
 
-    fn read_array(&mut self, number_type: NumberType, size: usize) -> AnalyzeResult<Object> {
-        macro_rules! read_array {
-            ($func:ident) => {
-                (0..size)
-                    .map(|_| self.reader.$func())
-                    .collect::<std::io::Result<Vec<_>>>()?
-            };
+    fn read_array_lazy(&mut self, object_type: ObjectType, size: u64) -> AnalyzeResult<Object> {
+        match object_type {
+            ObjectType::Void => Err(AnalyzeError::GenericError("can't read array of voids")),
+            ObjectType::Number(number_type) => {
+                let start = self.reader.position()?;
+                let size = size * (number_type.bitsize() / 8) as u64;
+                Ok(Object::ArrayRef {
+                    number_type,
+                    start,
+                    size,
+                })
+            }
+            ObjectType::Array(_) | ObjectType::ArrayRef(_) | ObjectType::Struct(_) => {
+                Err(AnalyzeError::GenericError("can't read array of this type"))
+            }
         }
-        Ok(Object::Array(match number_type {
-            NumberType::Char => NumberArray::Char(read_array!(read_u8)),
-            NumberType::U8 => NumberArray::U8(read_array!(read_u8)),
-            NumberType::I8 => NumberArray::I8(read_array!(read_i8)),
-            NumberType::U16 => NumberArray::U16(if self.little_endian {
-                read_array!(read_u16)
-            } else {
-                read_array!(read_u16_be)
-            }),
-            NumberType::I16 => NumberArray::I16(if self.little_endian {
-                read_array!(read_i16)
-            } else {
-                read_array!(read_i16_be)
-            }),
-            NumberType::U32 => NumberArray::U32(if self.little_endian {
-                read_array!(read_u32)
-            } else {
-                read_array!(read_u32_be)
-            }),
-            NumberType::I32 => NumberArray::I32(if self.little_endian {
-                read_array!(read_i32)
-            } else {
-                read_array!(read_i32_be)
-            }),
-            NumberType::U64 => NumberArray::U64(if self.little_endian {
-                read_array!(read_u64)
-            } else {
-                read_array!(read_u64_be)
-            }),
-            NumberType::I64 => NumberArray::I64(if self.little_endian {
-                read_array!(read_i64)
-            } else {
-                read_array!(read_i64_be)
-            }),
-            NumberType::F32 => NumberArray::F32(if self.little_endian {
-                read_array!(read_f32)
-            } else {
-                read_array!(read_f32_be)
-            }),
-            NumberType::F64 => NumberArray::F64(if self.little_endian {
-                read_array!(read_f64)
-            } else {
-                read_array!(read_f64_be)
-            }),
-        }))
     }
 
-    fn variable(&self, variable_ref: VariableRef) -> Option<&Object> {
+    fn resolve_variable(&mut self, variable_ref: VariableRef) -> AnalyzeResult<&Object> {
+        let variable = self.variable(variable_ref);
+
+        if let Object::ArrayRef {
+            number_type,
+            start,
+            size,
+        } = variable
+        {
+            let number_type = *number_type;
+            let start = *start;
+            let size = *size;
+
+            let reader_pos = self.reader.position()?;
+            self.reader.seek(SeekFrom::Start(start))?;
+
+            macro_rules! read_array {
+                ($func:ident) => {
+                    (0..size)
+                        .map(|_| self.reader.$func())
+                        .collect::<std::io::Result<Vec<_>>>()?
+                };
+            }
+            let result = Object::Array(match number_type {
+                NumberType::Char => NumberArray::Char(read_array!(read_u8)),
+                NumberType::U8 => NumberArray::U8(read_array!(read_u8)),
+                NumberType::I8 => NumberArray::I8(read_array!(read_i8)),
+                NumberType::U16 => NumberArray::U16(if self.little_endian {
+                    read_array!(read_u16)
+                } else {
+                    read_array!(read_u16_be)
+                }),
+                NumberType::I16 => NumberArray::I16(if self.little_endian {
+                    read_array!(read_i16)
+                } else {
+                    read_array!(read_i16_be)
+                }),
+                NumberType::U32 => NumberArray::U32(if self.little_endian {
+                    read_array!(read_u32)
+                } else {
+                    read_array!(read_u32_be)
+                }),
+                NumberType::I32 => NumberArray::I32(if self.little_endian {
+                    read_array!(read_i32)
+                } else {
+                    read_array!(read_i32_be)
+                }),
+                NumberType::U64 => NumberArray::U64(if self.little_endian {
+                    read_array!(read_u64)
+                } else {
+                    read_array!(read_u64_be)
+                }),
+                NumberType::I64 => NumberArray::I64(if self.little_endian {
+                    read_array!(read_i64)
+                } else {
+                    read_array!(read_i64_be)
+                }),
+                NumberType::F32 => NumberArray::F32(if self.little_endian {
+                    read_array!(read_f32)
+                } else {
+                    read_array!(read_f32_be)
+                }),
+                NumberType::F64 => NumberArray::F64(if self.little_endian {
+                    read_array!(read_f64)
+                } else {
+                    read_array!(read_f64_be)
+                }),
+            });
+
+            self.reader.seek(SeekFrom::Start(reader_pos))?;
+
+            *self.variable_mut(variable_ref) = result;
+        }
+
+        Ok(self.variable(variable_ref))
+    }
+
+    fn variable(&self, variable_ref: VariableRef) -> &Object {
         self.code_block_stack
             .iter()
             .rev()
             .find_map(|sc| sc.variables.get(&variable_ref))
+            .unwrap()
     }
 
-    fn set_variable(&mut self, variable_ref: VariableRef, value: Object) {
+    fn variable_mut(&mut self, variable_ref: VariableRef) -> &mut Object {
+        self.code_block_stack
+            .iter_mut()
+            .rev()
+            .find_map(|sc| sc.variables.get_mut(&variable_ref))
+            .unwrap()
+    }
+
+    fn initialize_variable(&mut self, variable_ref: VariableRef, value: Object) {
         assert!(!matches!(value, Object::VariableRef(_)));
         self.curr_code_block_context_mut()
             .variables
             .insert(variable_ref, value);
     }
 
-    fn resolve_object(&mut self, object: Object) -> Object {
-        match object {
-            Object::VariableRef(variable_ref) => self.variable(variable_ref).unwrap().clone(),
+    fn resolve_object(&mut self, object: Object) -> AnalyzeResult<Object> {
+        Ok(match object {
+            Object::VariableRef(variable_ref) => self.variable(variable_ref).clone(),
+            Object::ArrayEntryRef {
+                variable_ref,
+                index,
+            } => {
+                let index = index as usize;
+                let variable = self.resolve_variable(variable_ref)?;
+                match variable {
+                    Object::Array(number_array) => match number_array {
+                        NumberArray::Char(v) => Object::new_char(v[index]),
+                        NumberArray::U8(v) => Object::new_u8(v[index]),
+                        NumberArray::I8(v) => Object::new_i8(v[index]),
+                        NumberArray::U16(v) => Object::new_u16(v[index]),
+                        NumberArray::I16(v) => Object::new_i16(v[index]),
+                        NumberArray::U32(v) => Object::new_u32(v[index]),
+                        NumberArray::I32(v) => Object::new_i32(v[index]),
+                        NumberArray::U64(v) => Object::new_u64(v[index]),
+                        NumberArray::I64(v) => Object::new_i64(v[index]),
+                        NumberArray::F32(v) => Object::new_f32(v[index]),
+                        NumberArray::F64(v) => Object::new_f64(v[index]),
+                    },
+                    _ => return Err(AnalyzeError::GenericError("Not an array")),
+                }
+            }
             o => o,
-        }
+        })
     }
 }
 

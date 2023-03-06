@@ -149,6 +149,7 @@ impl RowData {
                 start,
                 size,
             } => todo!(),
+            bt_lib::Object::Struct(_) => todo!(),
             bt_lib::Object::VariableRef(_) | bt_lib::Object::Void => unreachable!(),
         };
         RowData {
@@ -158,7 +159,7 @@ impl RowData {
             name: parsed_object.name.clone(),
             type_string,
             value,
-            bg_color: parsed_object.color,
+            bg_color: parsed_object.color.map(|v| v.0),
         }
     }
 

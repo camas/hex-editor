@@ -1,6 +1,6 @@
 use std::num::Wrapping;
 
-use super::{NumberType, ObjectError, ObjectResult};
+use super::{ObjectError, ObjectResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Number {
@@ -16,6 +16,21 @@ pub enum Number {
     I64(Wrapping<i64>),
     F32(f32),
     F64(f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NumberType {
+    Char,
+    U8,
+    I8,
+    U16,
+    I16,
+    U32,
+    I32,
+    U64,
+    I64,
+    F32,
+    F64,
 }
 
 macro_rules! unary_operation {
@@ -130,41 +145,18 @@ macro_rules! equality_operation {
     };
 }
 
-impl Number {
-    pub(crate) fn bitsize(&self) -> u8 {
-        match self {
-            Number::Char(_) => 8,
-            Number::U8(_) => 8,
-            Number::I8(_) => 8,
-            Number::U16(_) => 16,
-            Number::I16(_) => 16,
-            Number::U32(_) => 32,
-            Number::I32(_) => 32,
-            Number::U64(_) => 64,
-            Number::I64(_) => 64,
-            Number::F32(_) => 32,
-            Number::F64(_) => 64,
-        }
-    }
-
-    pub(crate) fn signed(&self) -> bool {
-        match self {
-            Number::Char(_) | Number::U8(_) | Number::U16(_) | Number::U32(_) | Number::U64(_) => {
-                false
+macro_rules! get_type {
+    ($fn_name:ident, $return_type:ty, $num_type:ident) => {
+        pub(crate) fn $fn_name(&self) -> $return_type {
+            match self {
+                Number::$num_type(v) => *v,
+                _ => unreachable!(),
             }
-            Number::I8(_)
-            | Number::I16(_)
-            | Number::I32(_)
-            | Number::I64(_)
-            | Number::F32(_)
-            | Number::F64(_) => true,
         }
-    }
+    };
+}
 
-    pub(crate) fn float(&self) -> bool {
-        matches!(self, Number::F32(_) | Number::F64(_))
-    }
-
+impl Number {
     pub(crate) fn as_u64(&self) -> u64 {
         match self {
             Number::Char(v) => v.0 as u64,
@@ -274,5 +266,43 @@ impl Number {
 
     pub(crate) fn logical_or(self, other: Number) -> Number {
         Number::U8(Wrapping((self.as_bool() && other.as_bool()) as u8))
+    }
+}
+
+impl NumberType {
+    pub(crate) fn bitsize(&self) -> u8 {
+        match self {
+            NumberType::Char => 8,
+            NumberType::U8 => 8,
+            NumberType::I8 => 8,
+            NumberType::U16 => 16,
+            NumberType::I16 => 16,
+            NumberType::U32 => 32,
+            NumberType::I32 => 32,
+            NumberType::U64 => 64,
+            NumberType::I64 => 64,
+            NumberType::F32 => 32,
+            NumberType::F64 => 64,
+        }
+    }
+
+    pub(crate) fn signed(&self) -> bool {
+        match self {
+            NumberType::Char
+            | NumberType::U8
+            | NumberType::U16
+            | NumberType::U32
+            | NumberType::U64 => false,
+            NumberType::I8
+            | NumberType::I16
+            | NumberType::I32
+            | NumberType::I64
+            | NumberType::F32
+            | NumberType::F64 => true,
+        }
+    }
+
+    pub(crate) fn float(&self) -> bool {
+        matches!(self, NumberType::F32 | NumberType::F64)
     }
 }

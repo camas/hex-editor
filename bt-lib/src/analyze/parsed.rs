@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::object::{NumberArray, NumberType, ObjectType};
+use crate::{
+    instruction::Color,
+    object::{number::NumberType, NumberArray, ObjectType},
+};
 
 use super::Object;
 
@@ -11,14 +14,14 @@ pub struct ParsedObjects {
     seen_names_stack: Vec<HashMap<String, u64>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ParsedObject {
     pub name: String,
     pub value: Object,
     pub indent: u8,
     pub start: u64,
     pub end: u64,
-    pub color: Option<u32>,
+    pub color: Option<Color>,
 }
 
 impl Default for ParsedObjects {
@@ -40,7 +43,7 @@ impl ParsedObjects {
         value: Object,
         start: u64,
         end: u64,
-        color: Option<u32>,
+        color: Option<Color>,
     ) {
         // Consolidates sequential basic types into arrays
         if let Some(last) = self.objects.last_mut() {

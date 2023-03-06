@@ -1,4 +1,4 @@
-use crate::object::{NumberType, ObjectType};
+use crate::object::{number::NumberType, ObjectType};
 
 #[derive(Debug)]
 pub enum Instruction {
@@ -34,13 +34,13 @@ pub enum Instruction {
         variable_ref: VariableRef,
         object_type: ObjectType,
         arg_count: usize,
-        attributes: Vec<Attribute>,
+        color: Option<Color>,
     },
     ReadArray {
         name: String,
         variable_ref: VariableRef,
-        number_type: NumberType,
-        attributes: Vec<Attribute>,
+        object_type: ObjectType,
+        color: Option<Color>,
     },
     /// Cast top of stack to target object (Replaces)
     Cast(ObjectType),
@@ -61,7 +61,7 @@ pub enum Instruction {
     /// Gets the member of the item on top of the stack
     GetMember(String),
     /// Array declaration values. Top n stack objects are the values
-    DeclareArrayValues(usize),
+    DeclareArrayValues(u64),
     // Unary instructions. Acts on top stack value
     SuffixIncrement,
     SuffixDecrement,
@@ -114,6 +114,12 @@ pub struct VariableRef(pub(crate) u64);
 pub struct LabelRef(pub(crate) u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CodeBlockRef {
+    Function(FunctionRef),
+    Struct(StructRef),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionRef(pub(crate) u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -121,8 +127,11 @@ pub struct StructRef(pub(crate) u64);
 
 #[derive(Debug, Clone)]
 pub enum Attribute {
-    Color(u32),
+    Color(Color),
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Color(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BasicFunction {

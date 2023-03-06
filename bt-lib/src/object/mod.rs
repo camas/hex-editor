@@ -1,8 +1,8 @@
-use std::num::Wrapping;
+use std::{collections::btree_map::Values, num::Wrapping};
 
-use crate::instruction::VariableRef;
+use crate::instruction::{StructRef, VariableRef};
 
-use self::number::Number;
+use self::number::{Number, NumberType};
 
 pub(crate) mod number;
 
@@ -23,7 +23,7 @@ pub enum ObjectError {
     InvalidCastTarget(ObjectType),
 }
 
-type ObjectResult<T> = Result<T, ObjectError>;
+pub(crate) type ObjectResult<T> = Result<T, ObjectError>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Object {
@@ -31,34 +31,26 @@ pub enum Object {
     Number(Number),
     Array(NumberArray),
     ArrayRef {
-        number_type: Number,
+        number_type: NumberType,
         start: u64,
         size: u64,
     },
+    ArrayEntryRef {
+        variable_ref: VariableRef,
+        index: u64,
+    },
+    TempArray(Vec<Object>),
+    Struct(Struct),
     VariableRef(VariableRef),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ObjectType {
     Void,
     Number(NumberType),
     Array(NumberType),
     ArrayRef(NumberType),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum NumberType {
-    Char,
-    U8,
-    I8,
-    U16,
-    I16,
-    U32,
-    I32,
-    U64,
-    I64,
-    F32,
-    F64,
+    Struct(StructRef),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +66,11 @@ pub enum NumberArray {
     I64(Vec<i64>),
     F32(Vec<f32>),
     F64(Vec<f64>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct {
+    struct_ref: StructRef,
 }
 
 macro_rules! unary_number_operation {
@@ -220,24 +217,15 @@ impl Object {
                 NumberArray::F32(_) => NumberType::F32,
                 NumberArray::F64(_) => NumberType::F64,
             }),
-            Object::ArrayRef { number_type, .. } => ObjectType::Array(match number_type {
-                Number::Char(_) => NumberType::Char,
-                Number::U8(_) => NumberType::U8,
-                Number::I8(_) => NumberType::I8,
-                Number::U16(_) => NumberType::U16,
-                Number::I16(_) => NumberType::I16,
-                Number::U32(_) => NumberType::U32,
-                Number::I32(_) => NumberType::I32,
-                Number::U64(_) => NumberType::U64,
-                Number::I64(_) => NumberType::I64,
-                Number::F32(_) => NumberType::F32,
-                Number::F64(_) => NumberType::F64,
-            }),
+            Object::ArrayRef { number_type, .. } => ObjectType::Array(*number_type),
+            Object::Struct(Struct { struct_ref, .. }) => ObjectType::Struct(*struct_ref),
             Object::VariableRef(_) => todo!(),
+            Object::ArrayEntryRef { .. } => todo!(),
+            Object::TempArray(_) => unreachable!(),
         }
     }
 
-    pub(crate) fn cast(self, target_type: ObjectType) -> ObjectResult<Object> {
+    pub(crate) fn cast(&self, target_type: ObjectType) -> ObjectResult<Object> {
         Ok(match (self, target_type) {
             (Object::Number(number), ObjectType::Number(target_number_type)) => {
                 Object::Number(number.cast(target_number_type))
@@ -322,6 +310,7 @@ impl Object {
         }
     }
 
+    get_num!(get_char, u8, Char);
     get_num!(get_u8, u8, U8);
     get_num!(get_i8, i8, I8);
     get_num!(get_u16, u16, U16);
@@ -387,4 +376,143 @@ impl ObjectType {
             _ => return Err(ObjectError::GenericError("can't create default type")),
         })
     }
+}
+
+macro_rules! index_mut {
+    ($array:expr, $index:expr) => {
+        $array
+            .get_mut($index as usize)
+            .ok_or(ObjectError::GenericError("index oob"))?
+    };
+}
+
+macro_rules! cast {
+    ($value:expr, $num_type:ident, $fn:ident) => {
+        $value
+            .cast(ObjectType::Number(NumberType::$num_type))?
+            .$fn()
+    };
+}
+
+macro_rules! index_fn {
+    ($fn_name:ident, $op:tt) => {
+        pub(crate) fn $fn_name(&mut self, index: u64, value: Object) -> ObjectResult<()> {
+            match self {
+                NumberArray::Char(v) => *index_mut!(v, index) $op cast!(value, Char, get_char),
+                NumberArray::U8(v) => *index_mut!(v, index) $op cast!(value, U8, get_u8),
+                NumberArray::I8(v) => *index_mut!(v, index) $op cast!(value, I8, get_i8),
+                NumberArray::U16(v) => *index_mut!(v, index) $op cast!(value, U16, get_u16),
+                NumberArray::I16(v) => *index_mut!(v, index) $op cast!(value, I16, get_i16),
+                NumberArray::U32(v) => *index_mut!(v, index) $op cast!(value, U32, get_u32),
+                NumberArray::I32(v) => *index_mut!(v, index) $op cast!(value, I32, get_i32),
+                NumberArray::U64(v) => *index_mut!(v, index) $op cast!(value, U64, get_u64),
+                NumberArray::I64(v) => *index_mut!(v, index) $op cast!(value, I64, get_i64),
+                NumberArray::F32(v) => *index_mut!(v, index) $op cast!(value, F32, get_f32),
+                NumberArray::F64(v) => *index_mut!(v, index) $op cast!(value, F64, get_f64),
+            }
+
+            Ok(())
+        }
+    };
+}
+
+macro_rules! int_index_fn {
+    ($fn_name:ident, $op:tt) => {
+        pub(crate) fn $fn_name(&mut self, index: u64, value: Object) -> ObjectResult<()> {
+            match self {
+                NumberArray::Char(v) => *index_mut!(v, index) $op cast!(value, Char, get_char),
+                NumberArray::U8(v) => *index_mut!(v, index) $op cast!(value, U8, get_u8),
+                NumberArray::I8(v) => *index_mut!(v, index) $op cast!(value, I8, get_i8),
+                NumberArray::U16(v) => *index_mut!(v, index) $op cast!(value, U16, get_u16),
+                NumberArray::I16(v) => *index_mut!(v, index) $op cast!(value, I16, get_i16),
+                NumberArray::U32(v) => *index_mut!(v, index) $op cast!(value, U32, get_u32),
+                NumberArray::I32(v) => *index_mut!(v, index) $op cast!(value, I32, get_i32),
+                NumberArray::U64(v) => *index_mut!(v, index) $op cast!(value, U64, get_u64),
+                NumberArray::I64(v) => *index_mut!(v, index) $op cast!(value, I64, get_i64),
+                NumberArray::F32(v) => return Err(ObjectError::IntOperationOnFloat),
+                NumberArray::F64(v) => return Err(ObjectError::IntOperationOnFloat),
+            }
+
+            Ok(())
+        }
+    };
+}
+
+impl NumberArray {
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            NumberArray::Char(v) => v.len(),
+            NumberArray::U8(v) => v.len(),
+            NumberArray::I8(v) => v.len(),
+            NumberArray::U16(v) => v.len(),
+            NumberArray::I16(v) => v.len(),
+            NumberArray::U32(v) => v.len(),
+            NumberArray::I32(v) => v.len(),
+            NumberArray::U64(v) => v.len(),
+            NumberArray::I64(v) => v.len(),
+            NumberArray::F32(v) => v.len(),
+            NumberArray::F64(v) => v.len(),
+        }
+    }
+
+    pub(crate) fn number_type(&self) -> NumberType {
+        match self {
+            NumberArray::Char(_) => NumberType::Char,
+            NumberArray::U8(_) => NumberType::U8,
+            NumberArray::I8(_) => NumberType::I8,
+            NumberArray::U16(_) => NumberType::U16,
+            NumberArray::I16(_) => NumberType::I16,
+            NumberArray::U32(_) => NumberType::U32,
+            NumberArray::I32(_) => NumberType::I32,
+            NumberArray::U64(_) => NumberType::U64,
+            NumberArray::I64(_) => NumberType::I64,
+            NumberArray::F32(_) => NumberType::F32,
+            NumberArray::F64(_) => NumberType::F64,
+        }
+    }
+
+    pub(crate) fn set_values(&mut self, values: Vec<Object>) -> ObjectResult<()> {
+        let num_values = values
+            .into_iter()
+            .map(|v| match v {
+                Object::Number(_) => Ok(v),
+                _ => Err(ObjectError::GenericError("not a number")),
+            })
+            .collect::<ObjectResult<Vec<_>>>()?;
+
+        macro_rules! set_values {
+            ($array:expr, $num_type:ident, $get_fn:ident) => {{
+                $array.clear();
+                for value in num_values {
+                    $array.push(cast!(value, $num_type, $get_fn));
+                }
+            }};
+        }
+        match self {
+            NumberArray::Char(array) => set_values!(array, Char, get_char),
+            NumberArray::U8(array) => set_values!(array, U8, get_u8),
+            NumberArray::I8(array) => set_values!(array, I8, get_i8),
+            NumberArray::U16(array) => set_values!(array, U16, get_u16),
+            NumberArray::I16(array) => set_values!(array, I16, get_i16),
+            NumberArray::U32(array) => set_values!(array, U32, get_u32),
+            NumberArray::I32(array) => set_values!(array, I32, get_i32),
+            NumberArray::U64(array) => set_values!(array, U64, get_u64),
+            NumberArray::I64(array) => set_values!(array, I64, get_i64),
+            NumberArray::F32(array) => set_values!(array, F32, get_f32),
+            NumberArray::F64(array) => set_values!(array, F64, get_f64),
+        }
+
+        Ok(())
+    }
+
+    index_fn!(add, +=);
+    index_fn!(subtract, -=);
+    index_fn!(multiply, *=);
+    index_fn!(divide, /=);
+    index_fn!(modulus, %=);
+    int_index_fn!(left_shift, <<=);
+    int_index_fn!(right_shift, >>=);
+    int_index_fn!(bitwise_and, &=);
+    int_index_fn!(bitwise_xor, ^=);
+    int_index_fn!(bitwise_or, |=);
 }

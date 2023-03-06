@@ -150,7 +150,7 @@ fn Grid<G: Html>(cx: Scope) -> View<G> {
                 color_objects_in_range
                     .iter()
                     .find(|o| o.start <= i && o.end >= i)
-                    .map(|o| o.color.unwrap())
+                    .map(|o| o.color.unwrap().0)
             })
             .collect::<Vec<_>>();
 

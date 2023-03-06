@@ -29,7 +29,7 @@ fn analyze_basic_data() {
 }
 
 #[test]
-fn test_if_statement() {
+fn if_statement() {
     let data = vec![0x01, 0x00, 0x00, 0x00];
     let program_str = "
         if (false) {
@@ -38,11 +38,11 @@ fn test_if_statement() {
             i32 b;
         }
     ";
-    test_program_output(program_str, data, vec![("b", Object::new_i32(1))], b"");
+    test_program_output(program_str, data, vec![("b", Object::new_i32(1))], "");
 }
 
 #[test]
-fn test_while_statement() {
+fn while_statement() {
     let data = vec![0x01, 0x02, 0x03, 0x04];
     let program_str = "
         local i32 a = 2;
@@ -54,8 +54,8 @@ fn test_while_statement() {
     test_program_output(
         program_str,
         data,
-        vec![("b", Object::new_u8(1)), ("b", Object::new_u8(2))],
-        b"",
+        vec![("b", Object::Array(NumberArray::U8(vec![1, 2])))],
+        "",
     );
 }
 
@@ -71,12 +71,64 @@ fn for_statement() {
     test_program_output(
         program_str,
         data,
-        vec![
-            ("b", Object::new_u8(1)),
-            ("b", Object::new_u8(1)),
-            ("b", Object::new_u8(1)),
-        ],
-        b"",
+        vec![("b", Object::Array(NumberArray::U8(vec![1, 1, 1])))],
+        "",
+    );
+}
+
+#[test]
+fn increment_decrement() {
+    let program_str = r#"
+        local u8 a = 5;
+        local u8 b = 5;
+        local u8 c = 5;
+        local u8 d = 5;
+        Printf("%d %d %d %d\n", --a, ++b, c++, d++);
+    "#;
+
+    test_program_output(program_str, vec![], vec![], "4 6 5 5\n");
+}
+
+#[test]
+fn variable_scope() {
+    let program_str = r#"
+    local int a = 0;
+
+    void aaa() {
+        a += 10;
+    }
+
+    aaa();
+    aaa();
+
+    Printf("%d\n", a);
+"#;
+
+    test_program_output(program_str, vec![], vec![], "20\n");
+}
+
+#[test]
+fn arrays() {
+    let data = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a];
+    let program_str = r#"
+        u8 a[10];
+        local u8 b[3] = {2-1,2,2+1};
+        b[0] += 10;
+        Printf("%d %d\n", a[1+3], b[0]);
+    "#;
+
+    test_program_output(
+        program_str,
+        data,
+        vec![(
+            "a",
+            Object::ArrayRef {
+                number_type: NumberType::U8,
+                start: 0,
+                size: 10,
+            },
+        )],
+        "5 11\n",
     );
 }
 
@@ -91,11 +143,11 @@ fn function() {
         a(4, 5.3);
     "#;
 
-    test_program_output(program_str, data, Vec::new(), b"Hello 4 5.3\n");
+    test_program_output(program_str, data, Vec::new(), "Hello 4 5.3\n");
 }
 
 #[test]
-fn statements() {
+fn structs() {
     let data = vec![0x00, 0x00, 0x00, 0x10, 0x00, 0x12, 0x00, 0x03];
     let program_str = r#"
         struct A {
@@ -110,7 +162,7 @@ fn statements() {
         Printf("%d\n", a.b3);
     "#;
 
-    test_program_output(program_str, data, Vec::new(), b"");
+    test_program_output(program_str, data, Vec::new(), "");
 }
 
 #[test]
@@ -118,14 +170,14 @@ fn analyze_lenna() {
     let data = std::fs::read("../bt-lib/test-resources/Lenna.png").unwrap();
     let program = std::fs::read_to_string("../bt-lib/test-resources/PNG.bt").unwrap();
 
-    test_program_output(&program, data, Vec::new(), b"");
+    test_program_output(&program, data, Vec::new(), "");
 }
 
 fn test_program_output(
     program_str: &str,
     data: Vec<u8>,
     expected_objects: Vec<(&str, Object)>,
-    expected_stdout: &[u8],
+    expected_stdout: &str,
 ) {
     let program = transform(parse_bt(program_str).unwrap()).unwrap();
     println!("{:#?}", program);
@@ -147,5 +199,5 @@ fn test_program_output(
         assert_eq!(actual.value, expected.1);
     }
 
-    assert_eq!(result.stdout, expected_stdout);
+    assert_eq!(String::from_utf8(result.stdout).unwrap(), expected_stdout);
 }
