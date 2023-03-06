@@ -148,7 +148,11 @@ impl RowData {
                 number_type,
                 start,
                 size,
-            } => todo!(),
+            } => (
+                // TODO: Load the first n values and show them
+                format!("array ref {:?} x {}", number_type, size),
+                "...".to_string(),
+            ),
             bt_lib::Object::Struct(_) => todo!(),
             bt_lib::Object::VariableRef(_)
             | bt_lib::Object::Void

@@ -802,6 +802,7 @@ impl<'a> ExecutionContext<'a> {
             ObjectType::Number(number_type) => {
                 let start = self.reader.position()?;
                 let size = size * (number_type.bitsize() / 8) as u64;
+                self.reader.seek(SeekFrom::Current(size as i64))?;
                 Ok(Object::ArrayRef {
                     number_type,
                     start,
