@@ -150,7 +150,10 @@ impl RowData {
                 size,
             } => todo!(),
             bt_lib::Object::Struct(_) => todo!(),
-            bt_lib::Object::VariableRef(_) | bt_lib::Object::Void => unreachable!(),
+            bt_lib::Object::VariableRef(_)
+            | bt_lib::Object::Void
+            | bt_lib::Object::ArrayEntryRef { .. }
+            | bt_lib::Object::TempArray(_) => unreachable!(),
         };
         RowData {
             result_uuid,
