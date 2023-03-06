@@ -1,15 +1,20 @@
+use std::borrow::Borrow;
+
 use bt_lib::{
-    analyze::{self, AnalyzedData},
+    analyze::AnalyzedData,
     object::{NumberArray, Object},
     ParsedObject,
 };
 use sycamore::prelude::*;
 use uuid::Uuid;
 
-use crate::{Invalidate, RunRequested};
+use crate::{DataInfo, Invalidate, RunRequested};
+
+const ARRAY_DATA_LIMIT: u64 = 20;
 
 #[component]
 pub fn ParsedView<G: Html>(cx: Scope) -> View<G> {
+    let data_info_signal = use_context::<Signal<DataInfo>>(cx);
     let analyzed_data_signal = use_context::<Signal<AnalyzedData>>(cx);
     let invalidate_signal = use_context::<Signal<Invalidate>>(cx);
     let run_requested_signal = use_context::<Signal<RunRequested>>(cx);
@@ -21,6 +26,7 @@ pub fn ParsedView<G: Html>(cx: Scope) -> View<G> {
     };
 
     create_effect(cx, || {
+        let data_info = data_info_signal.get_untracked();
         let results = analyzed_data_signal.get();
 
         let uuid = Uuid::new_v4();
@@ -28,7 +34,7 @@ pub fn ParsedView<G: Html>(cx: Scope) -> View<G> {
             results
                 .parsed_objects
                 .iter()
-                .map(|v| RowData::from_parsed_object(v, uuid))
+                .map(|v| RowData::from_parsed_object(v, uuid, data_info.borrow()))
                 .collect(),
         );
         invalidate_signal.modify().invalidate();
@@ -94,71 +100,12 @@ struct RowData {
 }
 
 impl RowData {
-    fn from_parsed_object(parsed_object: &ParsedObject, result_uuid: Uuid) -> RowData {
-        let (type_string, value) = match &parsed_object.value {
-            Object::Number(number) => match number {
-                bt_lib::Number::Char(v) => ("char".to_string(), (v.0 as char).to_string()),
-                bt_lib::Number::U8(v) => ("u8".to_string(), v.to_string()),
-                bt_lib::Number::I8(v) => ("i8".to_string(), v.to_string()),
-                bt_lib::Number::U16(v) => ("u16".to_string(), v.to_string()),
-                bt_lib::Number::I16(v) => ("i16".to_string(), v.to_string()),
-                bt_lib::Number::U32(v) => ("u32".to_string(), v.to_string()),
-                bt_lib::Number::I32(v) => ("i32".to_string(), v.to_string()),
-                bt_lib::Number::U64(v) => ("u64".to_string(), v.to_string()),
-                bt_lib::Number::I64(v) => ("i64".to_string(), v.to_string()),
-                bt_lib::Number::F32(v) => ("f32".to_string(), format!("{:.8}", v)),
-                bt_lib::Number::F64(v) => ("f64".to_string(), format!("{:.8}", v)),
-            },
-            bt_lib::Object::Array(NumberArray::Char(v)) => (
-                format!("char[{}]", v.len()),
-                String::from_utf8_lossy(&v.iter().cloned().take(10).collect::<Vec<_>>())
-                    .into_owned(),
-            ),
-            bt_lib::Object::Array(NumberArray::U8(v)) => {
-                (format!("u8[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::I8(v)) => {
-                (format!("i8[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::U16(v)) => {
-                (format!("u16[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::I16(v)) => {
-                (format!("i16[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::U32(v)) => {
-                (format!("u32[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::I32(v)) => {
-                (format!("i32[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::U64(v)) => {
-                (format!("u64[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::I64(v)) => {
-                (format!("i64[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::F32(v)) => {
-                (format!("f32[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::Array(NumberArray::F64(v)) => {
-                (format!("f64[{}]", v.len()), array_value_str(v))
-            }
-            bt_lib::Object::ArrayRef {
-                number_type,
-                start,
-                size,
-            } => (
-                // TODO: Load the first n values and show them
-                format!("array ref {:?} x {}", number_type, size),
-                "...".to_string(),
-            ),
-            bt_lib::Object::Struct(_) => todo!(),
-            bt_lib::Object::VariableRef(_)
-            | bt_lib::Object::Void
-            | bt_lib::Object::ArrayEntryRef { .. }
-            | bt_lib::Object::TempArray(_) => unreachable!(),
-        };
+    fn from_parsed_object(
+        parsed_object: &ParsedObject,
+        result_uuid: Uuid,
+        data_info: &DataInfo,
+    ) -> RowData {
+        let (type_string, value) = object_to_string_data(&parsed_object.value, data_info);
         RowData {
             result_uuid,
             start: parsed_object.start,
@@ -175,13 +122,83 @@ impl RowData {
     }
 }
 
+fn object_to_string_data(object: &Object, data_info: &DataInfo) -> (String, String) {
+    match object {
+        Object::Number(number) => match number {
+            bt_lib::Number::Char(v) => ("char".to_string(), (v.0 as char).to_string()),
+            bt_lib::Number::U8(v) => ("u8".to_string(), v.to_string()),
+            bt_lib::Number::I8(v) => ("i8".to_string(), v.to_string()),
+            bt_lib::Number::U16(v) => ("u16".to_string(), v.to_string()),
+            bt_lib::Number::I16(v) => ("i16".to_string(), v.to_string()),
+            bt_lib::Number::U32(v) => ("u32".to_string(), v.to_string()),
+            bt_lib::Number::I32(v) => ("i32".to_string(), v.to_string()),
+            bt_lib::Number::U64(v) => ("u64".to_string(), v.to_string()),
+            bt_lib::Number::I64(v) => ("i64".to_string(), v.to_string()),
+            bt_lib::Number::F32(v) => ("f32".to_string(), format!("{:.8}", v)),
+            bt_lib::Number::F64(v) => ("f64".to_string(), format!("{:.8}", v)),
+        },
+        bt_lib::Object::Array(NumberArray::Char(v)) => (
+            format!("char[{}]", v.len()),
+            String::from_utf8_lossy(&v.iter().cloned().take(10).collect::<Vec<_>>()).into_owned(),
+        ),
+        bt_lib::Object::Array(NumberArray::U8(v)) => {
+            (format!("u8[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::I8(v)) => {
+            (format!("i8[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::U16(v)) => {
+            (format!("u16[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::I16(v)) => {
+            (format!("i16[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::U32(v)) => {
+            (format!("u32[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::I32(v)) => {
+            (format!("i32[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::U64(v)) => {
+            (format!("u64[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::I64(v)) => {
+            (format!("i64[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::F32(v)) => {
+            (format!("f32[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::Array(NumberArray::F64(v)) => {
+            (format!("f64[{}]", v.len()), array_value_str(v))
+        }
+        bt_lib::Object::ArrayRef {
+            number_type,
+            start,
+            size,
+        } => {
+            let object = bt_lib::resolve(
+                *number_type,
+                *start,
+                (*size).min(ARRAY_DATA_LIMIT),
+                &mut data_info.provider.get_reader_mut(),
+            );
+            object_to_string_data(&object, data_info)
+        }
+        bt_lib::Object::Struct(_) => todo!(),
+        bt_lib::Object::VariableRef(_)
+        | bt_lib::Object::Void
+        | bt_lib::Object::ArrayEntryRef { .. }
+        | bt_lib::Object::TempArray(_) => unreachable!(),
+    }
+}
+
 fn array_value_str<T>(values: &[T]) -> String
 where
     T: ToString,
 {
     values
         .iter()
-        .take(20)
+        .take(ARRAY_DATA_LIMIT as usize)
         .map(|v| v.to_string())
         .intersperse(", ".to_string())
         .collect()

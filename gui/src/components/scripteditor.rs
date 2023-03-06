@@ -21,36 +21,10 @@ pub fn ScriptEditor<G: Html>(cx: Scope) -> View<G> {
         if let Some(monaco_ref) = monaco_ref.try_get::<DomNode>() {
             if let Some(element) = monaco_ref.to_web_sys().dyn_ref::<HtmlElement>() {
                 let editor = CodeEditor::create(element, Some(get_options()));
-                editor.get_model().unwrap().set_value(
-                    "// Example script
-
-void background(u64 size) {
-    u8 background[size]<color=0x000000>;
-}
-
-void text(u64 size) {
-    u8 text[size]<color=0xff0000>;
-}
-
-background(53);
-text(6);
-background(8);
-text(10);
-background(35);
-
-local u64 a;
-for (a = 0; a < 0x10 * 6; a++) {
-    u8 filler; // Color automatically picked if unspecified
-}
-
-while (a > 0) {
-    f64 b1;
-    f32 b2;
-    u16 b3;
-    a--;
-}
-",
-                );
+                editor
+                    .get_model()
+                    .unwrap()
+                    .set_value(include_str!("../../example.bt"));
                 editor_signal.set(Some(editor));
                 run_requested_signal.set(RunRequested);
             }

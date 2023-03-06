@@ -1,0 +1,29 @@
+// Example script
+
+void background(u64 size) {
+    u8 background[size]<color=0x000000>;
+}
+
+void text(u64 size) {
+    u8 text[size]<color=0xff0000>;
+}
+
+background(53);
+text(6);
+background(8);
+text(10);
+background(35);
+
+local u64 a;
+for (a = 0; a < 0x10 * 6; a++) {
+    // Similar consecutive values consolidated in the results
+    // Color automatically picked if unspecified
+    u8 filler;
+}
+
+while (a > 0) {
+    f64 b1;
+    f32 b2;
+    u16 b3;
+    a--;
+}
